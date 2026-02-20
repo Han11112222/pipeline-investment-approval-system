@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (파이썬이 직접 계산!)
+# [함수] 금융 계산 로직 (파이썬 시뮬레이션)
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -51,14 +51,18 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     return npv_val, irr_val, irr_reason, flows
 
 # --------------------------------------------------------------------------
-# [함수] 데이터 컬럼 유연 매핑
+# [함수] 2차원 좌표 스캔 (복잡한 엑셀 헤더 완벽 대응)
 # --------------------------------------------------------------------------
-def find_col(df, keywords):
-    for col in df.columns:
-        col_str = str(col).replace(" ", "").replace("\n", "")
-        for kw in keywords:
-            if kw in col_str:
-                return col
+def get_col_idx(df, keywords, exact=False):
+    # 상위 20개 행 전체를 스캔하여 키워드가 위치한 컬럼(열) 번호를 찾습니다.
+    for col_idx in range(df.shape[1]):
+        for row_idx in range(min(20, df.shape[0])):
+            val = str(df.iloc[row_idx, col_idx]).replace(" ", "").replace("\n", "")
+            for kw in keywords:
+                if exact:
+                    if val == kw: return col_idx
+                else:
+                    if kw in val: return col_idx
     return None
 
 # --------------------------------------------------------------------------
@@ -84,79 +88,93 @@ with st.sidebar:
 # [UI] 메인 화면
 # --------------------------------------------------------------------------
 st.title("🏗️ 배관 투자 경제성 결재 대시보드")
-st.markdown("Raw 데이터를 기반으로 파이썬 엔진이 직접 세후 현금흐름을 시뮬레이션하여 **용도별/구간별 NPV와 IRR**을 계산합니다.")
+st.markdown("결재용 엑셀을 업로드하면 스마트 스캐너가 데이터를 자동 추출하여 **용도별 NPV/IRR**을 분석합니다.")
 
 uploaded_file = st.file_uploader("📂 결재용 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
 
 if uploaded_file is not None:
     try:
+        # 헤더 없이 통째로 데이터를 불러옵니다 (자유 양식 대응)
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, header=None) 
         else:
             df = pd.read_excel(uploaded_file, header=None)
-            
-        new_cols = []
-        for i in range(len(df.columns)):
-            val0 = str(df.iloc[0, i]).replace("nan", "").strip() if pd.notna(df.iloc[0, i]) else ""
-            val1 = str(df.iloc[1, i]).replace("nan", "").strip() if pd.notna(df.iloc[1, i]) else ""
-            new_cols.append(f"{val0}_{val1}") 
-        df.columns = new_cols
-        df = df.iloc[2:].reset_index(drop=True)
     except Exception as e:
         st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
         st.stop()
 
-    # 필수 컬럼 찾기 (용도 추가)
-    col_usage = find_col(df, ["용도", "가스용도"]) 
-    col_name = find_col(df, ["구간명"])
-    col_len = find_col(df, ["길이", "배관길이"])
-    col_inv = find_col(df, ["배관투자금액", "총공사비"])
-    col_contrib = find_col(df, ["시설분담금"])
-    col_other = find_col(df, ["기타이익", "보조금"])
-    col_jeon = find_col(df, ["수요전수계", "총전수"])
-    col_jeon_home = find_col(df, ["가정용", "주택용전수", "공동주택전수"]) 
-    col_vol = find_col(df, ["연간판매량", "판매량", "계(MJ)"]) 
-    col_rev = find_col(df, ["연간판매액", "판매액"])
-    col_cost = find_col(df, ["연간판매원가", "판매원가"])
+    # 1. 항목별 위치(인덱스) 자동 추적
+    # exact=True: '용도별합계' 같은 단어에 속지 않도록 정확히 '용도'만 찾습니다.
+    idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
+    idx_name = get_col_idx(df, ["구간명"], exact=True)
+    
+    # exact=False: '[MJ/년]' 등이 붙어있어도 포함된 단어면 찾습니다.
+    idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
+    idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
+    idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
+    idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
+    idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
+    idx_jeon_home = get_col_idx(df, ["공동주택전수", "가정용", "주택용전수"], exact=False) 
+    idx_vol = get_col_idx(df, ["계(MJ)", "연간판매량"], exact=False) 
+    idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
+    idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
 
-    if not col_name:
-        st.error("❌ 데이터에서 '구간명' 관련 컬럼을 찾을 수 없습니다.")
+    if idx_name is None:
+        st.error("❌ 데이터에서 '구간명'의 위치를 찾을 수 없습니다.")
         st.stop()
-        
-    # 용도 컬럼이 없을 경우 임시 부여
-    if not col_usage:
-        df['임시_용도'] = '미분류(용도없음)'
-        col_usage = '임시_용도'
-    else:
-        # 용도 데이터의 빈칸 채우기 (엑셀 병합셀 고려)
-        df[col_usage] = df[col_usage].ffill()
 
-    numeric_cols = [c for c in [col_len, col_inv, col_contrib, col_other, col_jeon, col_jeon_home, col_vol, col_rev, col_cost] if c is not None]
-    
-    for c in numeric_cols:
-        if df[c].dtype == object:
-            df[c] = df[c].astype(str).str.replace(',', '', regex=False)
-        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-        
-    # 1. 구간별 상세 (용도 + 구간명)
-    df_detail = df.groupby([col_usage, col_name])[numeric_cols].sum().reset_index()
-    
-    # 2. 용도별 합산 (용도만)
-    df_usage = df.groupby(col_usage)[numeric_cols].sum().reset_index()
+    # 2. 찾은 위치를 바탕으로 깔끔한 새 테이블(Dataframe) 생성
+    mapped_data = {}
+    mapped_data['용도'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
+    mapped_data['구간명'] = df.iloc[:, idx_name]
+    mapped_data['길이'] = df.iloc[:, idx_len] if idx_len is not None else 0
+    mapped_data['투자비'] = df.iloc[:, idx_inv] if idx_inv is not None else 0
+    mapped_data['분담금'] = df.iloc[:, idx_contrib] if idx_contrib is not None else 0
+    mapped_data['기타이익'] = df.iloc[:, idx_other] if idx_other is not None else 0
+    mapped_data['총전수'] = df.iloc[:, idx_jeon] if idx_jeon is not None else 0
+    mapped_data['가정용전수'] = df.iloc[:, idx_jeon_home] if idx_jeon_home is not None else 0
+    mapped_data['판매량'] = df.iloc[:, idx_vol] if idx_vol is not None else 0
+    mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
+    mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
 
-    st.success("✅ 파이썬 시뮬레이션 엔진 구동 완료! 결과를 출력합니다.")
+    clean_df = pd.DataFrame(mapped_data)
+
+    # 3. 쓰레기값 및 불필요한 행 제거 (결재 문서용 정제 작업)
+    clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
     
+    # 구간명이 비어있거나, 제목 줄 자체가 다시 들어간 경우 제외
+    invalid_names = ['', '0', 'nan', 'None', '구간명']
+    clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
+
+    # 4. 병합된 '용도' 빈칸 채우기 (앞 행의 용도를 따라감)
+    clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
+    clean_df['용도'] = clean_df['용도'].replace(['', '0', 'nan', 'None', '용도'], np.nan)
+    clean_df['용도'] = clean_df['용도'].ffill().fillna('미분류')
+
+    # 5. 숫자 데이터 변환 (콤마 제거)
+    num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '가정용전수', '판매량', '판매액', '판매원가']
+    for c in num_cols:
+        if clean_df[c].dtype == object:
+            clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
+        clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
+
+    # --- 그룹화 및 계산 실행 ---
+    df_detail = clean_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
+    df_usage = clean_df.groupby('용도')[num_cols].sum().reset_index()
+
+    st.success("✅ 파일 업로드 및 데이터 정제 완료! 결과를 출력합니다.")
+
     # 계산 실행용 헬퍼 함수
     def get_analysis_result(row):
-        s_len = row[col_len] if col_len else 0
-        s_inv = row[col_inv] if col_inv else 0
-        s_contrib = row[col_contrib] if col_contrib else 0
-        s_other = row[col_other] if col_other else 0
-        s_jeon = row[col_jeon] if col_jeon else 0
-        s_jeon_home = row[col_jeon_home] if col_jeon_home else 0
-        s_vol = row[col_vol] if col_vol else 0
-        s_rev = row[col_rev] if col_rev else 0
-        s_cost = row[col_cost] if col_cost else 0
+        s_len = row['길이']
+        s_inv = row['투자비']
+        s_contrib = row['분담금']
+        s_other = row['기타이익']
+        s_jeon = row['총전수']
+        s_jeon_home = row['가정용전수']
+        s_vol = row['판매량']
+        s_rev = row['판매액']
+        s_cost = row['판매원가']
         
         s_basic_rev = sim_basic_price * s_jeon_home * 12
 
@@ -168,7 +186,7 @@ if uploaded_file is not None:
         return s_len, s_inv - s_contrib - s_other, s_vol, npv, irr, irr_msg
 
     # --- 전체 합산 결과 ---
-    t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(df[numeric_cols].sum())
+    t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(clean_df[num_cols].sum())
     
     st.subheader("1. 📊 전체 통합 합산 결과 (Grand Total)")
     m1, m2 = st.columns(2)
@@ -180,9 +198,7 @@ if uploaded_file is not None:
     st.subheader("2. 📁 용도별 경제성 요약")
     usage_results = []
     for _, row in df_usage.iterrows():
-        usage_name = str(row[col_usage]).replace("nan", "미분류").strip()
-        if not usage_name or usage_name == "0": continue
-        
+        usage_name = row['용도']
         u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(row)
         usage_results.append({
             "용도": usage_name,
@@ -200,10 +216,8 @@ if uploaded_file is not None:
     st.subheader("3. 📑 용도-구간별 경제성 상세 명세서")
     detail_results = []
     for _, row in df_detail.iterrows():
-        usage_name = str(row[col_usage]).replace("nan", "미분류").strip()
-        section_name = str(row[col_name]).replace("nan", "").strip()
-        
-        if not section_name or section_name == "0": continue
+        usage_name = row['용도']
+        section_name = row['구간명']
         
         d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
         detail_results.append({

@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (정석 로직 그대로)
+# [함수] 금융 계산 로직 (전산 시스템과 대조할 순수 오리지널 로직)
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -17,14 +17,18 @@ def manual_npv(rate, values):
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    net_inv = round(sim_inv - sim_contrib - sim_other)
-    margin_total = round((sim_rev - sim_cost) + sim_basic_rev)
+    # 1. 초기 순투자액
+    net_inv = sim_inv - sim_contrib - sim_other
     
-    cost_sga = round((sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon))
-    annual_depreciation = round(sim_inv / dep_period) if dep_period > 0 else 0
+    # 2. 고정 수익/비용 항목 계산
+    margin_total = (sim_rev - sim_cost) + sim_basic_rev 
     
+    cost_sga = (sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
+    annual_depreciation = sim_inv / dep_period if dep_period > 0 else 0
+    
+    # 3. 세후 현금흐름(OCF) 산출
     ebit = margin_total - cost_sga - annual_depreciation
-    net_income = round(ebit * (1 - tax)) 
+    net_income = ebit * (1 - tax) 
     fixed_ocf = net_income + annual_depreciation
     
     flows = [-net_inv]
@@ -66,6 +70,8 @@ def get_col_idx(df, keywords, exact=False):
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 분석 변수 설정")
+    st.info("💡 전산 시스템의 NPV와 일치하도록 아래 단가와 세율을 시스템 세팅값과 동일하게 맞춰주세요.")
+    
     rate_pct = st.number_input("할인율 (%)", value=6.15, step=0.01, format="%.2f")
     tax_pct = st.number_input("법인세율+주민세율 (%)", value=22.0, step=0.1, format="%.1f")
     dep_period = st.number_input("감가상각 연수 (년)", value=30, step=1)
@@ -84,9 +90,9 @@ with st.sidebar:
 # [UI] 메인 화면
 # --------------------------------------------------------------------------
 st.title("🏗️ 배관 투자 경제성 결재 대시보드")
-st.markdown("결재용 엑셀을 업로드하면 데이터를 자동 추출합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
+st.markdown("전산 시스템 Raw 데이터를 업로드하여 경제성을 시뮬레이션합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
 
-uploaded_file = st.file_uploader("📂 결재용 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
+uploaded_file = st.file_uploader("📂 전산 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
 
 if uploaded_file is not None:
     try:
@@ -104,11 +110,9 @@ if uploaded_file is not None:
     idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
     idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
     idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
-    
     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
     idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
     idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
-    
     idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
     idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
     idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
@@ -145,6 +149,7 @@ if uploaded_file is not None:
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
     clean_df['총전수'] = np.maximum(clean_df['총전수'], clean_df['공동주택전수'] + clean_df['단독주택전수'])
+    
     clean_df['기본요금수익'] = 0.0
     temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
     is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
@@ -152,7 +157,7 @@ if uploaded_file is not None:
     
     num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-    st.success("✅ 파일 업로드 및 데이터 추출 완료! (에러 해결됨)")
+    st.success("✅ 전산 파일 업로드 완료! 사이드바의 변수를 전산 시스템과 동일하게 세팅해 보세요.")
 
     def get_analysis_result(row):
         npv, irr, irr_msg, _ = calculate_simulation(
@@ -162,7 +167,7 @@ if uploaded_file is not None:
         return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
 
     # ---------------------------------------------------------
-    # UI Section 1: 요약 표 (오류 수정: 숫자로 넣고 column_config로 포맷팅)
+    # UI Section 1: 요약 표
     # ---------------------------------------------------------
     st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
     
@@ -189,9 +194,9 @@ if uploaded_file is not None:
         column_config={
             "선택": st.column_config.CheckboxColumn("선택"),
             "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
-            "총 순투자액(원)": st.column_config.NumberColumn(format="%d"),
-            "연간판매량(MJ)": st.column_config.NumberColumn(format="%d"),
-            "NPV(원)": st.column_config.NumberColumn(format="%d"),
+            "총 순투자액(원)": st.column_config.NumberColumn(format="%.0f"),
+            "연간판매량(MJ)": st.column_config.NumberColumn(format="%.0f"),
+            "NPV(원)": st.column_config.NumberColumn(format="%.0f"),
             "IRR(%)": st.column_config.NumberColumn(format="%.2f")
         },
         disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
@@ -237,4 +242,4 @@ if uploaded_file is not None:
             "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
         }), use_container_width=True, hide_index=True)
 else:
-    st.info("👆 분석을 시작하려면 결재용 Raw 파일을 올려주세요.")
+    st.info("👆 분석을 시작하려면 전산 Raw 파일을 올려주세요.")

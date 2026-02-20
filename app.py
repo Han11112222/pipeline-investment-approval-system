@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (파이썬 시뮬레이션)
+# [함수] 금융 계산 로직 (기본요금 포함 오리지널 방식)
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -18,8 +18,10 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
     net_inv = sim_inv - sim_contrib - sim_other
+    # 원본 로직: 가스 마진 + 기본요금 수익
     margin_total = (sim_rev - sim_cost) + sim_basic_rev 
     unit_margin = margin_total / sim_vol if sim_vol > 0 else 0
+    
     cost_sga = (sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
     annual_depreciation = sim_inv / dep_period if dep_period > 0 else 0
     
@@ -51,10 +53,9 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
     return npv_val, irr_val, irr_reason, flows
 
 # --------------------------------------------------------------------------
-# [함수] 2차원 좌표 스캔 (복잡한 엑셀 헤더 완벽 대응)
+# [함수] 2차원 좌표 스캔
 # --------------------------------------------------------------------------
 def get_col_idx(df, keywords, exact=False):
-    # 상위 20개 행 전체를 스캔하여 키워드가 위치한 컬럼(열) 번호를 찾습니다.
     for col_idx in range(df.shape[1]):
         for row_idx in range(min(20, df.shape[0])):
             val = str(df.iloc[row_idx, col_idx]).replace(" ", "").replace("\n", "")
@@ -94,7 +95,6 @@ uploaded_file = st.file_uploader("📂 결재용 Raw 데이터 파일 업로드 
 
 if uploaded_file is not None:
     try:
-        # 헤더 없이 통째로 데이터를 불러옵니다 (자유 양식 대응)
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, header=None) 
         else:
@@ -104,17 +104,16 @@ if uploaded_file is not None:
         st.stop()
 
     # 1. 항목별 위치(인덱스) 자동 추적
-    # exact=True: '용도별합계' 같은 단어에 속지 않도록 정확히 '용도'만 찾습니다.
     idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
     idx_name = get_col_idx(df, ["구간명"], exact=True)
     
-    # exact=False: '[MJ/년]' 등이 붙어있어도 포함된 단어면 찾습니다.
     idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
     idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
     idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
     idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
+    
+    # 가정용 전수를 따로 찾지 않고 '총전수' 하나만 가져옴!
     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
-    idx_jeon_home = get_col_idx(df, ["공동주택전수", "가정용", "주택용전수"], exact=False) 
     idx_vol = get_col_idx(df, ["계(MJ)", "연간판매량"], exact=False) 
     idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
     idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
@@ -123,7 +122,7 @@ if uploaded_file is not None:
         st.error("❌ 데이터에서 '구간명'의 위치를 찾을 수 없습니다.")
         st.stop()
 
-    # 2. 찾은 위치를 바탕으로 깔끔한 새 테이블(Dataframe) 생성
+    # 2. 맵핑
     mapped_data = {}
     mapped_data['용도'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
     mapped_data['구간명'] = df.iloc[:, idx_name]
@@ -132,51 +131,53 @@ if uploaded_file is not None:
     mapped_data['분담금'] = df.iloc[:, idx_contrib] if idx_contrib is not None else 0
     mapped_data['기타이익'] = df.iloc[:, idx_other] if idx_other is not None else 0
     mapped_data['총전수'] = df.iloc[:, idx_jeon] if idx_jeon is not None else 0
-    mapped_data['가정용전수'] = df.iloc[:, idx_jeon_home] if idx_jeon_home is not None else 0
     mapped_data['판매량'] = df.iloc[:, idx_vol] if idx_vol is not None else 0
     mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
     mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
 
     clean_df = pd.DataFrame(mapped_data)
 
-    # 3. 쓰레기값 및 불필요한 행 제거 (결재 문서용 정제 작업)
+    # 3. 쓰레기값 정리
     clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
-    
-    # 구간명이 비어있거나, 제목 줄 자체가 다시 들어간 경우 제외
     invalid_names = ['', '0', 'nan', 'None', '구간명']
     clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
 
-    # 4. 병합된 '용도' 빈칸 채우기 (앞 행의 용도를 따라감)
     clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
     clean_df['용도'] = clean_df['용도'].replace(['', '0', 'nan', 'None', '용도'], np.nan)
     clean_df['용도'] = clean_df['용도'].ffill().fillna('미분류')
 
-    # 5. 숫자 데이터 변환 (콤마 제거)
-    num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '가정용전수', '판매량', '판매액', '판매원가']
-    for c in num_cols:
+    # 숫자 변환
+    num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가']
+    for c in num_cols_base:
         if clean_df[c].dtype == object:
             clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
-    # --- 그룹화 및 계산 실행 ---
+    # ★★★ [핵심 복구 로직] 주택용/가정용일 경우에만 총전수 기준 기본요금수익 계산! ★★★
+    clean_df['기본요금수익'] = 0.0
+    is_home = clean_df['용도'].str.contains('주택|가정')
+    clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
+    
+    # 합산 시 기본요금수익도 함께 묶어서 더해지도록 리스트 업데이트
+    num_cols = num_cols_base + ['기본요금수익']
+
+    # --- 그룹화 ---
     df_detail = clean_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
     df_usage = clean_df.groupby('용도')[num_cols].sum().reset_index()
 
-    st.success("✅ 파일 업로드 및 데이터 정제 완료! 결과를 출력합니다.")
+    st.success("✅ 파일 업로드 및 '주택용 기본요금 적용' 완료! 결과를 출력합니다.")
 
-    # 계산 실행용 헬퍼 함수
+    # 계산 헬퍼 함수
     def get_analysis_result(row):
         s_len = row['길이']
         s_inv = row['투자비']
         s_contrib = row['분담금']
         s_other = row['기타이익']
         s_jeon = row['총전수']
-        s_jeon_home = row['가정용전수']
         s_vol = row['판매량']
         s_rev = row['판매액']
         s_cost = row['판매원가']
-        
-        s_basic_rev = sim_basic_price * s_jeon_home * 12
+        s_basic_rev = row['기본요금수익'] # 그룹별로 안전하게 합산된 기본요금수익 호출
 
         npv, irr, irr_msg, _ = calculate_simulation(
             s_len, s_inv, s_contrib, s_other, s_vol, s_rev, s_cost, 

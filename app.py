@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (오리지널 일치 확인 완료)
+# [함수] 금융 계산 로직
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -110,7 +110,12 @@ if uploaded_file is not None:
     idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
     idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
     idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
+    
+    # [강화된 전수 스캔] 총전수가 비어있을 경우를 대비해 공동/단독주택 칸도 긁어옴
     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
+    idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
+    idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
+    
     idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
     idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
     idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
@@ -127,7 +132,11 @@ if uploaded_file is not None:
     mapped_data['투자비'] = df.iloc[:, idx_inv] if idx_inv is not None else 0
     mapped_data['분담금'] = df.iloc[:, idx_contrib] if idx_contrib is not None else 0
     mapped_data['기타이익'] = df.iloc[:, idx_other] if idx_other is not None else 0
+    
     mapped_data['총전수'] = df.iloc[:, idx_jeon] if idx_jeon is not None else 0
+    mapped_data['공동주택전수'] = df.iloc[:, idx_jeon_apt] if idx_jeon_apt is not None else 0
+    mapped_data['단독주택전수'] = df.iloc[:, idx_jeon_single] if idx_jeon_single is not None else 0
+    
     mapped_data['판매량'] = df.iloc[:, idx_vol] if idx_vol is not None else 0
     mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
     mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
@@ -144,22 +153,24 @@ if uploaded_file is not None:
     clean_df['용도'] = clean_df['용도'].ffill().fillna('미분류')
 
     # 숫자 변환
-    num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가']
+    num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가']
     for c in num_cols_base:
         if clean_df[c].dtype == object:
             clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
-    # ★★★ [핵심 보정] 기본요금수익 계산 조건 강화 (띄어쓰기 무시, '외' 포함 방어) ★★★
+    # [핵심] 총전수가 비어있다면 공동+단독주택 합산값을 덮어씌움
+    clean_df['총전수'] = np.maximum(clean_df['총전수'], clean_df['공동주택전수'] + clean_df['단독주택전수'])
+
+    # [핵심 보정] 공동주택 키워드 확실히 포함하여 기본요금 계산
     clean_df['기본요금수익'] = 0.0
-    # 용도 문자열에서 모든 공백을 제거한 임시 시리즈 생성
     temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
     
-    # '주택' 또는 '가정'이 포함되면서, '외'라는 단어가 없는 경우만 True
-    is_home = temp_usage.str.contains('주택|가정') & ~temp_usage.str.contains('외')
+    # '주택', '가정', '공동' 중 하나라도 포함되고 '외'가 없으면 O.K
+    is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
     clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
     
-    num_cols = num_cols_base + ['기본요금수익']
+    num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
     st.success("✅ 파일 업로드 완료! 데이터 스캔 및 결재용 경제성 엔진 준비 완료.")
 
@@ -197,27 +208,24 @@ if uploaded_file is not None:
         
         is_selected = False if 'ROE' in str(u).upper() else True
         
+        # [해결] 빈칸 에러를 막기 위해 숫자를 미리 콤마 포함 문자로 만들어 넘김
         usage_results.append({
             "선택": is_selected,
             "용도": u,
-            "총 투자길이(m)": u_len,
-            "총 순투자액(원)": u_net_inv,
-            "연간판매량(MJ)": u_vol,
-            "NPV(원)": u_npv,
+            "총 투자길이(m)": f"{u_len:,.1f}",
+            "총 순투자액(원)": f"{u_net_inv:,.0f}",
+            "연간판매량(MJ)": f"{u_vol:,.0f}",
+            "NPV(원)": f"{u_npv:,.0f}",
             "IRR(%)": f"{u_irr*100:.2f}%" if u_irr is not None else u_irr_msg
         })
         
     df_usage_summary = pd.DataFrame(usage_results)
 
-    # ★★★ [수정포인트] format=",.0f" 를 통해 천단위 콤마 완벽 적용 ★★★
+    # 에러를 일으키던 강제 포맷팅 제거, 안전한 텍스트 그대로 표출
     edited_df = st.data_editor(
         df_usage_summary,
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", help="분석에 포함하려면 체크하세요"),
-            "총 투자길이(m)": st.column_config.NumberColumn(format=",.1f"),
-            "총 순투자액(원)": st.column_config.NumberColumn(format=",.0f"),
-            "연간판매량(MJ)": st.column_config.NumberColumn(format=",.0f"),
-            "NPV(원)": st.column_config.NumberColumn(format=",.0f")
         },
         disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
         hide_index=True,
@@ -258,9 +266,9 @@ if uploaded_file is not None:
         st.divider()
 
         # ---------------------------------------------------------
-        # UI Section 3: 선택된 용도의 상세 명세서
+        # UI Section 3: 선택된 용도의 상세 명세서 (기본요금 검증 열 추가!)
         # ---------------------------------------------------------
-        st.subheader("3. 📑 구간별 경제성 상세 명세서 (선택 항목)")
+        st.subheader("3. 📑 구간별 경제성 상세 명세서 (기본요금 검증 포함)")
         df_detail = filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
         
         detail_results = []
@@ -270,13 +278,22 @@ if uploaded_file is not None:
                 "용도": row['용도'],
                 "구간명": row['구간명'],
                 "투자길이(m)": d_len,
+                "공급전수(전)": row['총전수'],          # <--- 추가됨!
+                "기본요금수익(원)": row['기본요금수익'], # <--- 추가됨! (직접 눈으로 확인 가능)
                 "순투자액(원)": d_net_inv,
                 "연간판매량(MJ)": d_vol,
                 "NPV(원)": d_npv,
                 "IRR(%)": f"{d_irr*100:.2f}%" if d_irr is not None else d_irr_msg
             })
             
-        st.dataframe(pd.DataFrame(detail_results).style.format({"투자길이(m)": "{:,.1f}", "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(detail_results).style.format({
+            "투자길이(m)": "{:,.1f}", 
+            "공급전수(전)": "{:,.0f}",
+            "기본요금수익(원)": "{:,.0f}",
+            "순투자액(원)": "{:,.0f}", 
+            "연간판매량(MJ)": "{:,.0f}", 
+            "NPV(원)": "{:,.0f}"
+        }), use_container_width=True, hide_index=True)
 
 else:
     st.info("👆 분석을 시작하려면 결재용 Raw 파일을 올려주세요.")

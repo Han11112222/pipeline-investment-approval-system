@@ -9,27 +9,22 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (★ 엑셀 방식 100% 동기화 ★)
+# [함수] 금융 계산 로직 (정석 로직 그대로)
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
-    # 엑셀의 NPV 함수 타임라인과 동일하게 맞춤 (Year 0을 어떻게 처리할지 조정)
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
 
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    # 1. 초기 순투자액
     net_inv = round(sim_inv - sim_contrib - sim_other)
-    
-    # 2. 고정 수익/비용 항목 계산 (엑셀처럼 셀 단위로 반올림 적용)
     margin_total = round((sim_rev - sim_cost) + sim_basic_rev)
     
     cost_sga = round((sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon))
     annual_depreciation = round(sim_inv / dep_period) if dep_period > 0 else 0
     
-    # 3. 엑셀과 동일한 세후 현금흐름(OCF) 산출
     ebit = margin_total - cost_sga - annual_depreciation
-    net_income = round(ebit * (1 - tax)) # 세금 계산 후 엑셀처럼 정수 반올림
+    net_income = round(ebit * (1 - tax)) 
     fixed_ocf = net_income + annual_depreciation
     
     flows = [-net_inv]
@@ -39,9 +34,7 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
         flows.append(fixed_ocf)
         ocfs.append(fixed_ocf)
 
-    # 4. 지표 산출
     npv_val = manual_npv(rate, flows)
-    
     irr_val = None
     irr_reason = ""
     
@@ -57,9 +50,6 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
             
     return npv_val, irr_val, irr_reason, flows
 
-# --------------------------------------------------------------------------
-# [함수] 2차원 좌표 스캔
-# --------------------------------------------------------------------------
 def get_col_idx(df, keywords, exact=False):
     for col_idx in range(df.shape[1]):
         for row_idx in range(min(20, df.shape[0])):
@@ -146,10 +136,7 @@ if uploaded_file is not None:
     clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
     invalid_names = ['', '0', 'nan', 'None', '구간명']
     clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
-
-    clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
-    clean_df['용도'] = clean_df['용도'].replace(['', '0', 'nan', 'None', '용도'], np.nan)
-    clean_df['용도'] = clean_df['용도'].ffill().fillna('미분류')
+    clean_df['용도'] = clean_df['용도'].astype(str).str.strip().ffill().fillna('미분류')
 
     num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가']
     for c in num_cols_base:
@@ -158,57 +145,41 @@ if uploaded_file is not None:
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
     clean_df['총전수'] = np.maximum(clean_df['총전수'], clean_df['공동주택전수'] + clean_df['단독주택전수'])
-
     clean_df['기본요금수익'] = 0.0
     temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
-    
     is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
     clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
     
     num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-    st.success("✅ 파일 업로드 완료! 데이터 스캔 및 결재용 경제성 엔진 준비 완료.")
+    st.success("✅ 파일 업로드 및 데이터 추출 완료! (에러 해결됨)")
 
     def get_analysis_result(row):
-        s_len = row['길이']
-        s_inv = row['투자비']
-        s_contrib = row['분담금']
-        s_other = row['기타이익']
-        s_jeon = row['총전수']
-        s_vol = row['판매량']
-        s_rev = row['판매액']
-        s_cost = row['판매원가']
-        s_basic_rev = row['기본요금수익'] 
-
         npv, irr, irr_msg, _ = calculate_simulation(
-            s_len, s_inv, s_contrib, s_other, s_vol, s_rev, s_cost, 
-            s_jeon, s_basic_rev, RATE, TAX, dep_period, analysis_period, 
-            c_maint, c_adm_jeon, c_adm_m
+            row['길이'], row['투자비'], row['분담금'], row['기타이익'], row['판매량'], row['판매액'], row['판매원가'], 
+            row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
         )
-        return s_len, s_inv - s_contrib - s_other, s_vol, npv, irr, irr_msg
+        return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
 
     # ---------------------------------------------------------
-    # UI Section 1: 용도별 요약 & 체크박스
+    # UI Section 1: 요약 표 (오류 수정: 숫자로 넣고 column_config로 포맷팅)
     # ---------------------------------------------------------
     st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
     
     usage_results = []
-    unique_usages = clean_df['용도'].unique()
-    
-    for u in unique_usages:
+    for u in clean_df['용도'].unique():
         u_df = clean_df[clean_df['용도'] == u]
         u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
-        
         is_selected = False if 'ROE' in str(u).upper() else True
         
         usage_results.append({
             "선택": is_selected,
             "용도": u,
-            "총 투자길이(m)": f"{u_len:,.1f}",
-            "총 순투자액(원)": f"{u_net_inv:,.0f}",
-            "연간판매량(MJ)": f"{u_vol:,.0f}",
-            "NPV(원)": f"{u_npv:,.0f}",
-            "IRR(%)": f"{u_irr*100:.2f}%" if u_irr is not None else u_irr_msg
+            "총 투자길이(m)": float(u_len),
+            "총 순투자액(원)": float(u_net_inv),
+            "연간판매량(MJ)": float(u_vol),
+            "NPV(원)": float(u_npv),
+            "IRR(%)": float(u_irr*100) if u_irr is not None else None
         })
         
     df_usage_summary = pd.DataFrame(usage_results)
@@ -216,7 +187,12 @@ if uploaded_file is not None:
     edited_df = st.data_editor(
         df_usage_summary,
         column_config={
-            "선택": st.column_config.CheckboxColumn("선택", help="분석에 포함하려면 체크하세요"),
+            "선택": st.column_config.CheckboxColumn("선택"),
+            "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
+            "총 순투자액(원)": st.column_config.NumberColumn(format="%d"),
+            "연간판매량(MJ)": st.column_config.NumberColumn(format="%d"),
+            "NPV(원)": st.column_config.NumberColumn(format="%d"),
+            "IRR(%)": st.column_config.NumberColumn(format="%.2f")
         },
         disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
         hide_index=True,
@@ -224,64 +200,41 @@ if uploaded_file is not None:
     )
 
     # ---------------------------------------------------------
-    # UI Section 2 & 3: 필터링 및 소계/상세 계산
+    # 필터링 및 소계/상세 계산
     # ---------------------------------------------------------
     selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
 
-    if not selected_usages:
-        st.warning("⚠️ 선택된 용도가 없습니다. 표에서 하나 이상의 용도를 체크해 주세요.")
-    else:
+    if selected_usages:
         filtered_df = clean_df[clean_df['용도'].isin(selected_usages)]
-        
         t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(filtered_df[num_cols].sum())
 
         st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
-        
         m1, m2 = st.columns(2)
         m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
         m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
         
         subtotal_df = pd.DataFrame([{
             "항목명": "☑️ 선택 용도 총합계",
-            "총 투자길이(m)": t_len,
-            "총 순투자액(원)": t_net_inv,
-            "연간판매량(MJ)": t_vol,
-            "NPV(원)": tot_npv,
-            "IRR(%)": f"{tot_irr*100:.2f}%" if tot_irr is not None else tot_irr_msg
+            "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
         }])
-        st.dataframe(
-            subtotal_df.style.format({"총 투자길이(m)": "{:,.1f}", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), 
-            use_container_width=True, hide_index=True
-        )
+        st.dataframe(subtotal_df.style.format({"{:,.1f}": "총 투자길이(m)", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), hide_index=True)
 
         st.divider()
 
-        st.subheader("3. 📑 구간별 경제성 상세 명세서 (기본요금 검증 포함)")
+        st.subheader("3. 📑 구간별 경제성 상세 명세서")
         df_detail = filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
-        
         detail_results = []
         for _, row in df_detail.iterrows():
             d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
             detail_results.append({
-                "용도": row['용도'],
-                "구간명": row['구간명'],
-                "투자길이(m)": d_len,
-                "공급전수(전)": row['총전수'],          
-                "기본요금수익(원)": row['기본요금수익'], 
-                "순투자액(원)": d_net_inv,
-                "연간판매량(MJ)": d_vol,
-                "NPV(원)": d_npv,
-                "IRR(%)": f"{d_irr*100:.2f}%" if d_irr is not None else d_irr_msg
+                "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len,
+                "공급전수(전)": row['총전수'], "기본요금수익(원)": row['기본요금수익'], 
+                "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
             })
             
         st.dataframe(pd.DataFrame(detail_results).style.format({
-            "투자길이(m)": "{:,.1f}", 
-            "공급전수(전)": "{:,.0f}",
-            "기본요금수익(원)": "{:,.0f}",
-            "순투자액(원)": "{:,.0f}", 
-            "연간판매량(MJ)": "{:,.0f}", 
-            "NPV(원)": "{:,.0f}"
+            "투자길이(m)": "{:,.1f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
+            "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
         }), use_container_width=True, hide_index=True)
-
 else:
     st.info("👆 분석을 시작하려면 결재용 Raw 파일을 올려주세요.")

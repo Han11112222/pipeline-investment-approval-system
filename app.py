@@ -4,9 +4,9 @@ import numpy as np
 import numpy_financial as npf
 
 # --------------------------------------------------------------------------
-# [설정] 페이지 기본
+# [설정] 페이지 기본 (결재 시스템 컨셉에 맞춘 타이틀)
 # --------------------------------------------------------------------------
-st.set_page_config(page_title="신규배관 경제성 분석 Simulation", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
 # [함수] 금융 계산 로직
@@ -71,7 +71,9 @@ def find_col(df, keywords):
 # [UI] 좌측 사이드바
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ 분석 변수")
+    st.header("⚙️ 분석 변수 설정")
+    st.markdown("결재 기준에 맞는 변수를 입력하세요.")
+    
     rate_pct = st.number_input("할인율 (%)", value=6.15, step=0.01, format="%.2f")
     tax_pct = st.number_input("법인세율+주민세율 (%)", value=22.0, step=0.1, format="%.1f")
     dep_period = st.number_input("감가상각 연수 (년)", value=30, step=1)
@@ -90,20 +92,31 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # [UI] 메인 화면
 # --------------------------------------------------------------------------
-st.title("🏗️ 신규배관 경제성 분석 다중 시뮬레이션")
-st.markdown("Raw 데이터(엑셀/CSV)를 업로드하면 **구간명** 기준으로 전체/용도별 경제성(NPV, IRR)을 일괄 분석합니다.")
+st.title("🏗️ 배관 투자 경제성 결재 대시보드")
+st.markdown("마케팅본부 공식 Raw 데이터(엑셀/CSV)를 업로드하면 **구간명** 기준으로 전체/용도별 경제성(NPV, IRR)을 일괄 분석합니다.")
 
-uploaded_file = st.file_uploader("📂 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
+uploaded_file = st.file_uploader("📂 결재용 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
 
 if uploaded_file is not None:
-    # 1. 파일 읽기
+    # 1. 파일 읽기 (2단 헤더 병합 처리)
     try:
         if uploaded_file.name.endswith('.csv'):
-            # 도시가스 raw 파일 특성상 앞부분 로우가 지저분할 수 있으므로, 
-            # 필요에 따라 skiprows=1 또는 2를 적용하실 수 있습니다.
-            df = pd.read_csv(uploaded_file, header=1) 
+            df = pd.read_csv(uploaded_file, header=None) 
         else:
-            df = pd.read_excel(uploaded_file, header=1)
+            df = pd.read_excel(uploaded_file, header=None)
+            
+        # 1~2번째 줄을 합쳐서 하나의 헤더로 결합
+        new_cols = []
+        for i in range(len(df.columns)):
+            val0 = str(df.iloc[0, i]).replace("nan", "").strip() if pd.notna(df.iloc[0, i]) else ""
+            val1 = str(df.iloc[1, i]).replace("nan", "").strip() if pd.notna(df.iloc[1, i]) else ""
+            new_cols.append(f"{val0}_{val1}") 
+        
+        df.columns = new_cols
+        
+        # 실제 데이터가 시작되는 3번째 줄(인덱스 2)부터 남김
+        df = df.iloc[2:].reset_index(drop=True)
+
     except Exception as e:
         st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
         st.stop()
@@ -115,30 +128,35 @@ if uploaded_file is not None:
     col_contrib = find_col(df, ["시설분담금"])
     col_other = find_col(df, ["기타이익", "보조금"])
     col_jeon = find_col(df, ["수요전수계", "총전수"])
-    col_jeon_home = find_col(df, ["가정용", "주택용전수", "공동주택전수"]) # 주택용 전수 파악용
-    col_vol = find_col(df, ["연간판매량", "판매량"])
+    col_jeon_home = find_col(df, ["가정용", "주택용전수", "공동주택전수"]) 
+    col_vol = find_col(df, ["연간판매량", "판매량", "계(MJ)"]) 
     col_rev = find_col(df, ["연간판매액", "판매액"])
     col_cost = find_col(df, ["연간판매원가", "판매원가"])
 
     if not col_name:
-        st.error("❌ 데이터에서 '구간명' 컬럼을 찾을 수 없습니다. 원본 파일의 헤더 위치를 확인해 주세요.")
+        st.error("❌ 데이터에서 '구간명' 관련 컬럼을 찾을 수 없습니다. 원본 파일 양식을 확인해 주세요.")
         st.stop()
-
-    st.success("✅ 파일 업로드 및 컬럼 매핑 완료! 데이터를 분석합니다.")
     
-    # 결측치 0으로 처리
-    df.fillna(0, inplace=True)
-    
-    # 3. 구간명 기준으로 그룹화 (Numeric 컬럼만 합산)
+    # 3. 데이터 전처리 (콤마 제거 및 숫자형 변환)
     numeric_cols = [c for c in [col_len, col_inv, col_contrib, col_other, col_jeon, col_jeon_home, col_vol, col_rev, col_cost] if c is not None]
+    
+    for c in numeric_cols:
+        if df[c].dtype == object:
+            df[c] = df[c].astype(str).str.replace(',', '', regex=False)
+        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        
     df_grouped = df.groupby(col_name)[numeric_cols].sum().reset_index()
 
+    st.success("✅ 파일 업로드 및 데이터 정제 완료! 경제성 분석을 수행합니다.")
+    
     # 4. 분석 결과 저장을 위한 리스트
     results = []
 
     for index, row in df_grouped.iterrows():
         section_name = row[col_name]
-        if str(section_name).strip() == "0" or str(section_name).strip() == "":
+        
+        # 구간명이 비어있거나 의미 없는 행은 건너뜀
+        if str(section_name).strip() in ["0", "", "nan", "None"]:
             continue
             
         s_len = row[col_len] if col_len else 0
@@ -189,14 +207,14 @@ if uploaded_file is not None:
     )
 
     # 5. 결과 출력
-    st.subheader("📊 전체 합산 경제성 결과")
+    st.subheader("📊 전체 구간 합산 투자 결과 (Total)")
     m1, m2 = st.columns(2)
     m1.metric("총 순현재가치 (Total NPV)", f"{tot_npv:,.0f} 원")
     m2.metric("총 내부수익률 (Total IRR)", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
 
     st.divider()
 
-    st.subheader("📑 구간명별 세부 분석 결과")
+    st.subheader("📑 구간별 경제성 분석 명세서")
     df_results = pd.DataFrame(results)
     
     # 숫자 포맷팅을 위해 Styler 적용
@@ -212,4 +230,4 @@ if uploaded_file is not None:
     )
     
 else:
-    st.info("👆 분석을 시작하려면 좌측 또는 상단의 업로드 영역에 Raw 파일을 올려주세요.")
+    st.info("👆 분석을 시작하려면 좌측 또는 상단의 업로드 영역에 결재용 Raw 파일을 올려주세요.")

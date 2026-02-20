@@ -88,7 +88,7 @@ with st.sidebar:
 # [UI] 메인 화면
 # --------------------------------------------------------------------------
 st.title("🏗️ 배관 투자 경제성 결재 대시보드")
-st.markdown("결재용 엑셀을 업로드하면 스마트 스캐너가 데이터를 자동 추출하여 **용도별 NPV/IRR**을 분석합니다.")
+st.markdown("결재용 엑셀을 업로드하면 데이터를 자동 추출합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
 
 uploaded_file = st.file_uploader("📂 결재용 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
 
@@ -102,7 +102,7 @@ if uploaded_file is not None:
         st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
         st.stop()
 
-    # 1. 항목별 위치(인덱스) 자동 추적
+    # 1. 항목별 위치 자동 추적
     idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
     idx_name = get_col_idx(df, ["구간명"], exact=True)
     
@@ -110,15 +110,8 @@ if uploaded_file is not None:
     idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
     idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
     idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
-    
-    # [수정포인트 1] 공동주택전수 명확화 (판매량의 가정용과 헷갈리지 않게 처리)
     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
-    idx_jeon_home = get_col_idx(df, ["공동주택전수", "주택용전수"], exact=False) 
-    
-    # ★★★ [수정포인트 2] 연간판매량 병합셀 오류 해결! ★★★
-    # 병합셀의 첫 칸이 아닌, 정확히 합계가 들어있는 '계(MJ)' 컬럼만 콕 집어서 찾도록 변경
     idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
-    
     idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
     idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
 
@@ -161,14 +154,9 @@ if uploaded_file is not None:
     clean_df['기본요금수익'] = 0.0
     is_home = clean_df['용도'].str.contains('주택|가정')
     clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
-    
     num_cols = num_cols_base + ['기본요금수익']
 
-    # --- 그룹화 ---
-    df_detail = clean_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
-    df_usage = clean_df.groupby('용도')[num_cols].sum().reset_index()
-
-    st.success("✅ 파일 업로드 완료! 판매량 데이터 정상 스캔 완료.")
+    st.success("✅ 파일 업로드 완료! 데이터 스캔 및 경제성 엔진 준비 완료.")
 
     # 계산 헬퍼 함수
     def get_analysis_result(row):
@@ -189,52 +177,107 @@ if uploaded_file is not None:
         )
         return s_len, s_inv - s_contrib - s_other, s_vol, npv, irr, irr_msg
 
-    # --- 전체 합산 결과 ---
-    t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(clean_df[num_cols].sum())
+    # ---------------------------------------------------------
+    # UI Section 1: 용도별 요약 & 체크박스 (Interactive Table)
+    # ---------------------------------------------------------
+    st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
+    st.info("💡 분석에서 제외할 용도(예: ROE)는 맨 앞의 **체크를 해제**하세요. 'ROE'는 자동으로 해제되어 있습니다.")
     
-    st.subheader("1. 📊 전체 통합 합산 결과 (Grand Total)")
-    m1, m2 = st.columns(2)
-    m1.metric("총 순현재가치 (Total NPV)", f"{tot_npv:,.0f} 원")
-    m2.metric("총 내부수익률 (Total IRR)", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
-    st.divider()
-
-    # --- 용도별 요약 ---
-    st.subheader("2. 📁 용도별 경제성 요약")
+    # 요약용 데이터 먼저 만들기
     usage_results = []
-    for _, row in df_usage.iterrows():
-        usage_name = row['용도']
-        u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(row)
+    unique_usages = clean_df['용도'].unique()
+    
+    for u in unique_usages:
+        u_df = clean_df[clean_df['용도'] == u]
+        u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
+        
+        # 'ROE'라는 단어가 들어가면 기본적으로 체크 해제(False)
+        is_selected = False if 'ROE' in str(u).upper() else True
+        
         usage_results.append({
-            "용도": usage_name,
+            "선택": is_selected,
+            "용도": u,
             "총 투자길이(m)": u_len,
             "총 순투자액(원)": u_net_inv,
             "연간판매량(MJ)": u_vol,
             "NPV(원)": u_npv,
             "IRR(%)": f"{u_irr*100:.2f}%" if u_irr is not None else u_irr_msg
         })
-    
-    st.dataframe(pd.DataFrame(usage_results).style.format({"총 투자길이(m)": "{:,.1f}", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), use_container_width=True, hide_index=True)
-    st.divider()
+        
+    df_usage_summary = pd.DataFrame(usage_results)
 
-    # --- 구간별 상세 ---
-    st.subheader("3. 📑 용도-구간별 경제성 상세 명세서")
-    detail_results = []
-    for _, row in df_detail.iterrows():
-        usage_name = row['용도']
-        section_name = row['구간명']
+    # st.data_editor를 사용하여 체크박스가 포함된 표 생성
+    edited_df = st.data_editor(
+        df_usage_summary,
+        column_config={
+            "선택": st.column_config.CheckboxColumn("선택", help="분석에 포함하려면 체크하세요"),
+            "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
+            "총 순투자액(원)": st.column_config.NumberColumn(format="%d"),
+            "연간판매량(MJ)": st.column_config.NumberColumn(format="%d"),
+            "NPV(원)": st.column_config.NumberColumn(format="%d")
+        },
+        disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
+        hide_index=True,
+        use_container_width=True
+    )
+
+    # ---------------------------------------------------------
+    # 필터링 및 소계/상세 계산
+    # ---------------------------------------------------------
+    selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
+
+    if not selected_usages:
+        st.warning("⚠️ 선택된 용도가 없습니다. 표에서 하나 이상의 용도를 체크해 주세요.")
+    else:
+        # 체크된 용도만 남기기
+        filtered_df = clean_df[clean_df['용도'].isin(selected_usages)]
         
-        d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
-        detail_results.append({
-            "용도": usage_name,
-            "구간명": section_name,
-            "투자길이(m)": d_len,
-            "순투자액(원)": d_net_inv,
-            "연간판매량(MJ)": d_vol,
-            "NPV(원)": d_npv,
-            "IRR(%)": f"{d_irr*100:.2f}%" if d_irr is not None else d_irr_msg
-        })
+        # 소계(Grand Total) 계산
+        t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(filtered_df[num_cols].sum())
+
+        st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
         
-    st.dataframe(pd.DataFrame(detail_results).style.format({"투자길이(m)": "{:,.1f}", "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), use_container_width=True, hide_index=True)
+        # 큼직한 메트릭 표시
+        m1, m2 = st.columns(2)
+        m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
+        m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
+        
+        # 요약표 하단에 붙는 형태처럼 깔끔한 소계 1줄짜리 표 생성
+        subtotal_df = pd.DataFrame([{
+            "항목명": "☑️ 선택 용도 총합계",
+            "총 투자길이(m)": t_len,
+            "총 순투자액(원)": t_net_inv,
+            "연간판매량(MJ)": t_vol,
+            "NPV(원)": tot_npv,
+            "IRR(%)": f"{tot_irr*100:.2f}%" if tot_irr is not None else tot_irr_msg
+        }])
+        st.dataframe(
+            subtotal_df.style.format({"총 투자길이(m)": "{:,.1f}", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), 
+            use_container_width=True, hide_index=True
+        )
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # UI Section 3: 선택된 용도의 상세 명세서
+        # ---------------------------------------------------------
+        st.subheader("3. 📑 구간별 경제성 상세 명세서 (선택 항목)")
+        df_detail = filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
+        
+        detail_results = []
+        for _, row in df_detail.iterrows():
+            d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
+            detail_results.append({
+                "용도": row['용도'],
+                "구간명": row['구간명'],
+                "투자길이(m)": d_len,
+                "순투자액(원)": d_net_inv,
+                "연간판매량(MJ)": d_vol,
+                "NPV(원)": d_npv,
+                "IRR(%)": f"{d_irr*100:.2f}%" if d_irr is not None else d_irr_msg
+            })
+            
+        st.dataframe(pd.DataFrame(detail_results).style.format({"투자길이(m)": "{:,.1f}", "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), use_container_width=True, hide_index=True)
 
 else:
     st.info("👆 분석을 시작하려면 결재용 Raw 파일을 올려주세요.")

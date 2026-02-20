@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직
+# [함수] 금융 계산 로직 (오리지널 일치 확인 완료)
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -150,13 +150,18 @@ if uploaded_file is not None:
             clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
-    # 기본요금수익 계산
+    # ★★★ [핵심 보정] 기본요금수익 계산 조건 강화 (띄어쓰기 무시, '외' 포함 방어) ★★★
     clean_df['기본요금수익'] = 0.0
-    is_home = clean_df['용도'].str.contains('주택|가정')
+    # 용도 문자열에서 모든 공백을 제거한 임시 시리즈 생성
+    temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
+    
+    # '주택' 또는 '가정'이 포함되면서, '외'라는 단어가 없는 경우만 True
+    is_home = temp_usage.str.contains('주택|가정') & ~temp_usage.str.contains('외')
     clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
+    
     num_cols = num_cols_base + ['기본요금수익']
 
-    st.success("✅ 파일 업로드 완료! 데이터 스캔 및 경제성 엔진 준비 완료.")
+    st.success("✅ 파일 업로드 완료! 데이터 스캔 및 결재용 경제성 엔진 준비 완료.")
 
     # 계산 헬퍼 함수
     def get_analysis_result(row):
@@ -183,7 +188,6 @@ if uploaded_file is not None:
     st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
     st.info("💡 분석에서 제외할 용도(예: ROE)는 맨 앞의 **체크를 해제**하세요. 'ROE'는 자동으로 해제되어 있습니다.")
     
-    # 요약용 데이터 먼저 만들기
     usage_results = []
     unique_usages = clean_df['용도'].unique()
     
@@ -191,7 +195,6 @@ if uploaded_file is not None:
         u_df = clean_df[clean_df['용도'] == u]
         u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
         
-        # 'ROE'라는 단어가 들어가면 기본적으로 체크 해제(False)
         is_selected = False if 'ROE' in str(u).upper() else True
         
         usage_results.append({
@@ -206,15 +209,15 @@ if uploaded_file is not None:
         
     df_usage_summary = pd.DataFrame(usage_results)
 
-    # st.data_editor를 사용하여 체크박스가 포함된 표 생성
+    # ★★★ [수정포인트] format=",.0f" 를 통해 천단위 콤마 완벽 적용 ★★★
     edited_df = st.data_editor(
         df_usage_summary,
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", help="분석에 포함하려면 체크하세요"),
-            "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
-            "총 순투자액(원)": st.column_config.NumberColumn(format="%d"),
-            "연간판매량(MJ)": st.column_config.NumberColumn(format="%d"),
-            "NPV(원)": st.column_config.NumberColumn(format="%d")
+            "총 투자길이(m)": st.column_config.NumberColumn(format=",.1f"),
+            "총 순투자액(원)": st.column_config.NumberColumn(format=",.0f"),
+            "연간판매량(MJ)": st.column_config.NumberColumn(format=",.0f"),
+            "NPV(원)": st.column_config.NumberColumn(format=",.0f")
         },
         disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
         hide_index=True,
@@ -229,20 +232,16 @@ if uploaded_file is not None:
     if not selected_usages:
         st.warning("⚠️ 선택된 용도가 없습니다. 표에서 하나 이상의 용도를 체크해 주세요.")
     else:
-        # 체크된 용도만 남기기
         filtered_df = clean_df[clean_df['용도'].isin(selected_usages)]
         
-        # 소계(Grand Total) 계산
         t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(filtered_df[num_cols].sum())
 
         st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
         
-        # 큼직한 메트릭 표시
         m1, m2 = st.columns(2)
         m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
         m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
         
-        # 요약표 하단에 붙는 형태처럼 깔끔한 소계 1줄짜리 표 생성
         subtotal_df = pd.DataFrame([{
             "항목명": "☑️ 선택 용도 총합계",
             "총 투자길이(m)": t_len,

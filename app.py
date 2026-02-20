@@ -9,7 +9,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (기본요금 포함 오리지널 방식)
+# [함수] 금융 계산 로직
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -18,7 +18,6 @@ def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
     net_inv = sim_inv - sim_contrib - sim_other
-    # 원본 로직: 가스 마진 + 기본요금 수익
     margin_total = (sim_rev - sim_cost) + sim_basic_rev 
     unit_margin = margin_total / sim_vol if sim_vol > 0 else 0
     
@@ -112,9 +111,14 @@ if uploaded_file is not None:
     idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
     idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
     
-    # 가정용 전수를 따로 찾지 않고 '총전수' 하나만 가져옴!
+    # [수정포인트 1] 공동주택전수 명확화 (판매량의 가정용과 헷갈리지 않게 처리)
     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
-    idx_vol = get_col_idx(df, ["계(MJ)", "연간판매량"], exact=False) 
+    idx_jeon_home = get_col_idx(df, ["공동주택전수", "주택용전수"], exact=False) 
+    
+    # ★★★ [수정포인트 2] 연간판매량 병합셀 오류 해결! ★★★
+    # 병합셀의 첫 칸이 아닌, 정확히 합계가 들어있는 '계(MJ)' 컬럼만 콕 집어서 찾도록 변경
+    idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
+    
     idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
     idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
 
@@ -153,19 +157,18 @@ if uploaded_file is not None:
             clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
         clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
 
-    # ★★★ [핵심 복구 로직] 주택용/가정용일 경우에만 총전수 기준 기본요금수익 계산! ★★★
+    # 기본요금수익 계산
     clean_df['기본요금수익'] = 0.0
     is_home = clean_df['용도'].str.contains('주택|가정')
     clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
     
-    # 합산 시 기본요금수익도 함께 묶어서 더해지도록 리스트 업데이트
     num_cols = num_cols_base + ['기본요금수익']
 
     # --- 그룹화 ---
     df_detail = clean_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
     df_usage = clean_df.groupby('용도')[num_cols].sum().reset_index()
 
-    st.success("✅ 파일 업로드 및 '주택용 기본요금 적용' 완료! 결과를 출력합니다.")
+    st.success("✅ 파일 업로드 완료! 판매량 데이터 정상 스캔 완료.")
 
     # 계산 헬퍼 함수
     def get_analysis_result(row):
@@ -177,7 +180,7 @@ if uploaded_file is not None:
         s_vol = row['판매량']
         s_rev = row['판매액']
         s_cost = row['판매원가']
-        s_basic_rev = row['기본요금수익'] # 그룹별로 안전하게 합산된 기본요금수익 호출
+        s_basic_rev = row['기본요금수익'] 
 
         npv, irr, irr_msg, _ = calculate_simulation(
             s_len, s_inv, s_contrib, s_other, s_vol, s_rev, s_cost, 

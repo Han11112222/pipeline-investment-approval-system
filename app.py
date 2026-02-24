@@ -287,41 +287,36 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     
     # --- 탭 2 전용 좌측 사이드바 하단 UI 구성 ---
     with st.sidebar:
-        st.header("💰 2026년 사업계획 투자한도액")
-        st.markdown("아래 표에 항목별 **[규모]**와 **[금액]**을 확인/수정하세요.")
+        st.header("💰 2026년 사업계획 투자한도액 세팅")
         
-        st.subheader("🔹 수요개발배관")
+        st.subheader("🔹 수요개발배관 (실적은 파일 자동 추출)")
+        st.markdown("수요개발배관의 한도액 디폴트값을 확인/수정하세요.")
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
-            "규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
-            "금액": [1055430560, 851196752, 287568274, 439429508, 182956113, 610435480, 0, 1695844012]  
+            "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
+            "한도_금액": [1055430560, 851196752, 287568274, 439429508, 182956113, 610435480, 0, 1695844012]  
         })
         edited_sd = st.data_editor(df_sd_base, key="sd_editor", hide_index=True, use_container_width=True)
-        # 수요개발배관 소계
-        sd_scale_sub = edited_sd['규모'].sum()
-        sd_amt_sub = edited_sd['금액'].sum()
-        st.markdown(f"<div style='text-align: right; color: #1E88E5;'><b>소계 ➔ 규모: {sd_scale_sub:,.0f} / 금액: {sd_amt_sub:,.0f}</b></div>", unsafe_allow_html=True)
         
         st.divider()
 
-        st.subheader("🔹 기본계획배관")
+        st.subheader("🔹 기본계획배관 (수기 입력 전용)")
+        st.markdown("다른 팀 공유 자료이므로 **기승인(이전차수)** 및 **금회(현재차수)** 실적을 직접 입력해 주세요.")
+        # 기본계획배관은 수기 입력을 위해 실적 컬럼을 열어둠
         df_bp_base = pd.DataFrame({
             "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "인입배관", "공급시설물 개선"],
-            "규모": [2828, 749, 624, 3, 857, 95], 
-            "금액": [2031952014, 626987840, 766452499, 338045023, 3230129038, 2749999724]  
+            "한도_규모": [2828, 749, 624, 3, 857, 95], 
+            "한도_금액": [2031952014, 626987840, 766452499, 338045023, 3230129038, 2749999724],
+            "기승인_규모": [0, 0, 0, 0, 0, 0],
+            "기승인_금액": [0, 0, 0, 0, 0, 0],
+            "금회_규모": [0, 0, 0, 0, 0, 0],
+            "금회_금액": [0, 0, 0, 0, 0, 0]
         })
         edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
-        # 기본계획배관 소계
-        bp_scale_sub = edited_bp['규모'].sum()
-        bp_amt_sub = edited_bp['금액'].sum()
-        st.markdown(f"<div style='text-align: right; color: #1E88E5;'><b>소계 ➔ 규모: {bp_scale_sub:,.0f} / 금액: {bp_amt_sub:,.0f}</b></div>", unsafe_allow_html=True)
-        
-        # 합산 예산 계산
-        budget_2026 = int(sd_amt_sub + bp_amt_sub)
 
     # --- 메인 화면 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
-    st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 엑셀 양식으로 자동 산출합니다.")
+    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관은 수기 입력값**을 더해 엑셀 양식으로 산출합니다.")
 
     if uploaded_files:
         st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
@@ -377,8 +372,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 col_total_vol = find_col('계(MJ)')
                 col_npv = find_col('NPV')
                 col_irr = find_col('IRR')
-                # 항목 맵핑을 위한 컬럼 찾기
-                col_category = find_col('항목') or find_col('구분') or find_col('용도') or find_col('가스용도') or find_col('투자내역')
+                
+                # 항목(공공택지, 공동주택 등)을 찾기 위해 폭넓게 컬럼 탐색
+                col_category = find_col('투자내역') or find_col('용도') or find_col('구분') or find_col('가스용도') or find_col('항목')
 
                 if col_name:
                     extracted['차수'] = file_cha
@@ -400,12 +396,15 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
 
-        # ==== 2. 항목별 기승인(이전), 금회(현재), 누계(전체) 그룹핑 연산 ====
+        # ==== 2. 수요개발배관 파일 자동 매핑을 위한 그룹핑 (기승인, 금회 분리) ====
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
+            # 매칭 정확도를 높이기 위해 띄어쓰기 제거
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
+            # 기승인 (선택 차수보다 작은 차수들의 누계)
             prev_df = all_parsed_df[all_parsed_df['차수'] < selected_cha_t2]
+            # 금회 (선택한 당해 차수)
             curr_df = all_parsed_df[all_parsed_df['차수'] == selected_cha_t2]
             
             prev_agg = prev_df.groupby('항목_clean')[['규모(m)', '투자비(원)']].sum()
@@ -415,8 +414,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             prev_agg = pd.DataFrame()
             curr_agg = pd.DataFrame()
 
-        # 표 데이터를 채워넣고 엑셀 수식(기승인 + 금회 = 누계)을 실행하는 함수
-        def fill_metrics(df_base):
+        # [핵심 로직] 파일에서 추출한 데이터를 수요개발배관 테이블에 유연하게(Fuzzy) 매핑하는 함수
+        def fill_sd_metrics(df_base):
             for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
                 df_base[col] = 0.0
                 
@@ -425,49 +424,64 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 if item_raw == '소계': continue
                 item_clean = str(item_raw).replace('\n', '').replace(' ', '')
                 
-                # 기승인 (이전 차수까지의 합)
-                if not prev_agg.empty and item_clean in prev_agg.index:
-                    df_base.at[i, '기승인_규모'] = prev_agg.at[item_clean, '규모(m)']
-                    df_base.at[i, '기승인_금액'] = prev_agg.at[item_clean, '투자비(원)']
+                # 1. 기승인(이전 차수 누계) 매핑
+                if not prev_agg.empty:
+                    matched_idx = [idx for idx in prev_agg.index if item_clean in str(idx).replace(' ', '') or str(idx).replace(' ', '') in item_clean]
+                    if matched_idx:
+                        df_base.at[i, '기승인_규모'] = prev_agg.loc[matched_idx, '규모(m)'].sum()
+                        df_base.at[i, '기승인_금액'] = prev_agg.loc[matched_idx, '투자비(원)'].sum()
                 
-                # 금회 (현재 차수의 합)
-                if not curr_agg.empty and item_clean in curr_agg.index:
-                    df_base.at[i, '금회_규모'] = curr_agg.at[item_clean, '규모(m)']
-                    df_base.at[i, '금회_금액'] = curr_agg.at[item_clean, '투자비(원)']
+                # 2. 금회(현재 차수 실적) 매핑
+                if not curr_agg.empty:
+                    matched_idx = [idx for idx in curr_agg.index if item_clean in str(idx).replace(' ', '') or str(idx).replace(' ', '') in item_clean]
+                    if matched_idx:
+                        df_base.at[i, '금회_규모'] = curr_agg.loc[matched_idx, '규모(m)'].sum()
+                        df_base.at[i, '금회_금액'] = curr_agg.loc[matched_idx, '투자비(원)'].sum()
                 
-                # [수식 적용] 누계 = 기승인 + 금회
+                # 3. 누계 및 잔여 계산
                 df_base.at[i, '누계_규모'] = df_base.at[i, '기승인_규모'] + df_base.at[i, '금회_규모']
                 df_base.at[i, '누계_금액'] = df_base.at[i, '기승인_금액'] + df_base.at[i, '금회_금액']
+                df_base.at[i, '잔여_금액'] = df_base.at[i, '한도_금액'] - df_base.at[i, '누계_금액']
                 
-            # 소계 행 계산
+            # 소계 행 합산
             sub_idx = len(df_base) - 1
-            for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
+            for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액', '잔여_금액']:
                 df_base.at[sub_idx, col] = df_base.iloc[:-1][col].sum()
                 
-            # [수식 적용] 잔여 금액 = 한도 금액 - 누계 금액
-            df_base['잔여_금액'] = df_base['한도_금액'] - df_base['누계_금액']
             return df_base
 
         st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
 
-        # 1. 수요개발배관 프레임 구성
+        # ==== 1. 수요개발배관 프레임 구성 (파일 자동 연동) ====
         df_sd_display = edited_sd.copy()
-        df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
-        df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', sd_scale_sub, sd_amt_sub] 
-        df_sd_display = fill_metrics(df_sd_display)
+        # 소계 행 뼈대 추가
+        df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', df_sd_display['한도_규모'].sum(), df_sd_display['한도_금액'].sum()] 
+        df_sd_display = fill_sd_metrics(df_sd_display)
         
-        # 2. 기본계획배관 프레임 구성
+        # ==== 2. 기본계획배관 프레임 구성 (수기 입력 기반 연동) ====
         df_bp_display = edited_bp.copy()
-        df_bp_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_bp_display.insert(0, '구분', '기본계획배관')
-        df_bp_display.loc[len(df_bp_display)] = ['기본계획배관', '소계', bp_scale_sub, bp_amt_sub]
-        df_bp_display = fill_metrics(df_bp_display)
+        # 기본계획배관은 사이드바에 입력된 값을 그대로 가져와서 누계/잔여만 더함
+        df_bp_display['누계_규모'] = df_bp_display['기승인_규모'] + df_bp_display['금회_규모']
+        df_bp_display['누계_금액'] = df_bp_display['기승인_금액'] + df_bp_display['금회_금액']
+        df_bp_display['잔여_금액'] = df_bp_display['한도_금액'] - df_bp_display['누계_금액']
         
-        # 3. 전체 프레임 병합
+        # 소계 행 뼈대 및 합산
+        bp_sub_row = {
+            '구분': '기본계획배관', '항목': '소계',
+            '한도_규모': df_bp_display['한도_규모'].sum(), '한도_금액': df_bp_display['한도_금액'].sum(),
+            '기승인_규모': df_bp_display['기승인_규모'].sum(), '기승인_금액': df_bp_display['기승인_금액'].sum(),
+            '금회_규모': df_bp_display['금회_규모'].sum(), '금회_금액': df_bp_display['금회_금액'].sum(),
+            '누계_규모': df_bp_display['누계_규모'].sum(), '누계_금액': df_bp_display['누계_금액'].sum(),
+            '잔여_금액': df_bp_display['잔여_금액'].sum()
+        }
+        df_bp_display = pd.concat([df_bp_display, pd.DataFrame([bp_sub_row])], ignore_index=True)
+        
+        # ==== 3. 전체 프레임 병합 ====
         df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
         
-        # 4. 총계 행(Total) 수식 계산 및 추가
+        # ==== 4. 총계 행(Total) 수식 계산 및 추가 ====
         sd_sub_idx = len(df_sd_display) - 1
         bp_sub_idx = len(df_bp_display) - 1
         
@@ -494,17 +508,17 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             tot_remain_amt                     
         ]
 
-        # 5. [신규] 승인비율 산출 (누계 금액 / 한도 금액 * 100)
+        # ==== 5. 승인비율 산출 (누계 금액 / 한도 금액 * 100) ====
         df_budget_detail['승인비율'] = np.where(
             df_budget_detail['한도_금액'] > 0, 
             (df_budget_detail['누계_금액'] / df_budget_detail['한도_금액']) * 100, 
             0
         )
         
-        # 6. [신규] 엑셀 셀 병합 효과 (중복되는 '구분' 텍스트 공란 처리)
+        # ==== 6. 엑셀 셀 병합 효과 (중복되는 '구분' 텍스트 공란 처리) ====
         df_budget_detail['구분'] = df_budget_detail['구분'].mask(df_budget_detail['구분'].duplicated(), '')
 
-        # 7. 엑셀 원본과 동일한 MultiIndex 헤더 생성 (+ 승인비율 추가)
+        # ==== 7. 엑셀 원본과 동일한 MultiIndex 헤더 생성 ====
         df_budget_detail.columns = pd.MultiIndex.from_tuples([
             ('구분', ''),
             ('항목', ''),
@@ -520,7 +534,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             ('승인비율', '(%)')
         ])
 
-        # 8. [신규] 소계 & 합계 색상 하이라이트 스타일 함수
+        # ==== 8. 소계 & 합계 색상 하이라이트 스타일 함수 ====
         def style_rows(row):
             if row[('항목', '')] == '소계':
                 return ['background-color: #E6F3FF; font-weight: bold'] * len(row) # 연한 파란색

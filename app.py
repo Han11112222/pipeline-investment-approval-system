@@ -324,7 +324,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 엑셀 양식으로 자동 산출합니다.")
 
     if uploaded_files:
-        # ==== 신규 기능: 1번째 탭과 동일한 차수 필터링 버튼 (메인 화면 최상단) ====
         st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
         st.markdown("---")
         
@@ -347,7 +346,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             
         st.markdown("---")
 
-        # ==== 데이터 추출 로직을 표 그리기 전에 먼저 수행 ====
+        # ==== 데이터 추출 로직 ====
         all_data = []
         current_inv_scale = 0
         current_inv_amount = 0
@@ -397,11 +396,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted = extracted.dropna(subset=['공사명'])
                     extracted = extracted[~extracted['공사명'].isin(['구간명', 'nan', ''])]
                     
-                    # 파일별 총합
                     file_total_scale = extracted['규모(m)'].sum()
                     file_total_inv = extracted['투자비(원)'].sum()
 
-                    # 선택된 차수를 기준으로 누계 및 금해 금액 산출
                     if file_cha <= selected_cha_t2:
                         total_inv_scale += file_total_scale
                         total_inv_amount += file_total_inv
@@ -409,7 +406,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                             current_inv_scale += file_total_scale
                             current_inv_amount += file_total_inv
 
-                    # 필터링 조건에 맞춰 하단 상세 표에 보낼 데이터 수집
                     if view_mode_t2 == "1. 당해차수 데이터":
                         if file_cha == selected_cha_t2:
                             all_data.append(extracted)
@@ -423,7 +419,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         # ==== 우측 메인 화면: 엑셀과 100% 동일한 구조의 종합 표 표출 ====
         st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
         
-        # 기승인 계산 (누계 - 금회)
         prev_inv_scale = total_inv_scale - current_inv_scale
         prev_inv_amt = total_inv_amount - current_inv_amount
 
@@ -431,12 +426,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
-        # 빈 컬럼 추가 (개별 항목 자동 매핑이 없으므로 빈칸/0 처리, 하단 총계에만 표시)
         for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
             df_sd_display[col] = 0
         df_sd_display['잔여_금액'] = df_sd_display['한도_금액']
-        
-        # 수요개발배관 소계 추가
         df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', sd_scale_sub, sd_amt_sub, 0, 0, 0, 0, 0, 0, sd_amt_sub]
         
         # 2. 기본계획배관 프레임 구성
@@ -446,24 +438,32 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
             df_bp_display[col] = 0
         df_bp_display['잔여_금액'] = df_bp_display['한도_금액']
-        
-        # 기본계획배관 소계 추가
         df_bp_display.loc[len(df_bp_display)] = ['기본계획배관', '소계', bp_scale_sub, bp_amt_sub, 0, 0, 0, 0, 0, 0, bp_amt_sub]
         
         # 3. 전체 프레임 병합
         df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
         
-        # 4. [핵심] 총계 행 추가 (여기서 파싱된 파일 데이터가 엑셀 구조에 맞춰 들어감)
+        # 4. 총계 행 추가
         df_budget_detail.loc[len(df_budget_detail)] = [
             '합계', '총계', 
-            sd_scale_sub + bp_scale_sub, budget_2026,          # 사업계획 투자한도액
-            prev_inv_scale, prev_inv_amt,                      # 본부투자 승인내역 (기승인)
-            current_inv_scale, current_inv_amount,             # 금회 신청 내역
-            total_inv_scale, total_inv_amount,                 # 본부투자 누계
-            budget_2026 - total_inv_amount                     # 잔여 한도액
+            sd_scale_sub + bp_scale_sub, budget_2026,          
+            prev_inv_scale, prev_inv_amt,                      
+            current_inv_scale, current_inv_amount,             
+            total_inv_scale, total_inv_amount,                 
+            budget_2026 - total_inv_amount                     
         ]
+
+        # 5. [신규] 승인비율 산출 (누계 금액 / 한도 금액 * 100)
+        df_budget_detail['승인비율'] = np.where(
+            df_budget_detail['한도_금액'] > 0, 
+            (df_budget_detail['누계_금액'] / df_budget_detail['한도_금액']) * 100, 
+            0
+        )
         
-        # 5. 엑셀 원본과 동일한 MultiIndex 헤더(다중 컬럼) 생성
+        # 6. [신규] 엑셀 셀 병합 효과 (중복되는 '구분' 텍스트 지우기)
+        df_budget_detail['구분'] = df_budget_detail['구분'].mask(df_budget_detail['구분'].duplicated(), '')
+
+        # 7. 엑셀 원본과 동일한 MultiIndex 헤더 생성 (+ 승인비율 추가)
         df_budget_detail.columns = pd.MultiIndex.from_tuples([
             ('구분', ''),
             ('항목', ''),
@@ -475,17 +475,31 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             (f'금회 신청 내역 ({selected_cha_t2}차)', '금액'),
             ('2026년 본부투자 누계', '규모(m)'),
             ('2026년 본부투자 누계', '금액'),
-            ('투자한도 잔액', '금액')
+            ('투자한도 잔액', '금액'),
+            ('승인비율', '(%)')
         ])
 
-        # 모든 숫자 컬럼에 천 단위 콤마 포맷 적용
-        format_dict = {col: "{:,.0f}" for col in df_budget_detail.columns if col[0] not in ['구분', '항목']}
+        # 8. [신규] 소계 & 합계 색상 하이라이트 함수 적용
+        def style_rows(row):
+            if row[('항목', '')] == '소계':
+                # 연한 파란색
+                return ['background-color: #E6F3FF; font-weight: bold'] * len(row)
+            elif row[('항목', '')] == '총계':
+                # 연한 빨간색
+                return ['background-color: #FFE6E6; font-weight: bold'] * len(row)
+            return [''] * len(row)
+
+        # 천 단위 콤마 포맷 & 승인비율 % 포맷 지정
+        format_dict = {col: "{:,.0f}" for col in df_budget_detail.columns if col[0] not in ['구분', '항목', '승인비율']}
+        format_dict[('승인비율', '(%)')] = "{:,.1f}%"
+
+        styled_df = df_budget_detail.style.format(format_dict).apply(style_rows, axis=1)
         
-        st.dataframe(df_budget_detail.style.format(format_dict), hide_index=True, use_container_width=True)
+        st.dataframe(styled_df, hide_index=True, use_container_width=True)
         
         st.divider()
         
-        # ==== 하단: 선택된 차수의 상세 데이터 표출 (기존 유지) ====
+        # ==== 하단: 선택된 차수의 상세 데이터 표출 ====
         if all_data:
             detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
             st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역")

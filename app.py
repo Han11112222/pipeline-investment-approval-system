@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import numpy_financial as npf
+import re
 
 # --------------------------------------------------------------------------
 # [설정] 페이지 기본
@@ -17,16 +18,12 @@ def manual_npv(rate, values):
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    # 1. 초기 순투자액
     net_inv = sim_inv - sim_contrib - sim_other
-    
-    # 2. 고정 수익/비용 항목 계산
     margin_total = (sim_rev - sim_cost) + sim_basic_rev 
     
     cost_sga = (sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
     annual_depreciation = sim_inv / dep_period if dep_period > 0 else 0
     
-    # 3. 세후 현금흐름(OCF) 산출
     ebit = margin_total - cost_sga - annual_depreciation
     net_income = ebit * (1 - tax) 
     fixed_ocf = net_income + annual_depreciation
@@ -75,13 +72,11 @@ menu_choice = st.sidebar.radio(
 )
 st.sidebar.divider()
 
-
 # ==========================================================================
 # 탭 1: 기존 배관 투자 경제성 결재 대시보드
 # ==========================================================================
 if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
-    # [UI] 탭 1 전용 사이드바 변수 설정
     with st.sidebar:
         st.header("⚙️ 분석 변수 설정")
         st.info("💡 전산 시스템의 NPV와 일치하도록 아래 단가와 세율을 시스템 세팅값과 동일하게 맞춰주세요.")
@@ -100,21 +95,29 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         RATE = rate_pct / 100
         TAX = tax_pct / 100
 
-    # [UI] 탭 1 메인 화면
     st.title("🏗️ 배관 투자 경제성 결재 대시보드")
     st.markdown("전산 시스템 Raw 데이터를 업로드하여 경제성을 시뮬레이션합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
 
-    uploaded_file = st.file_uploader("📂 전산 Raw 데이터 파일 업로드 (Excel 또는 CSV)", type=['xlsx', 'xls', 'csv'])
+    # [수정됨] 다중 파일 업로드 지원
+    uploaded_files = st.file_uploader("📂 전산 Raw 데이터 파일 업로드 (Excel/CSV 다중 선택 가능)", type=['xlsx', 'xls', 'csv'], accept_multiple_files=True)
 
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file, header=None) 
-            else:
-                df = pd.read_excel(uploaded_file, header=None)
-        except Exception as e:
-            st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+    if uploaded_files:
+        df_list = []
+        for file in uploaded_files:
+            try:
+                if file.name.endswith('.csv'):
+                    temp_df = pd.read_csv(file, header=None) 
+                else:
+                    temp_df = pd.read_excel(file, header=None)
+                df_list.append(temp_df)
+            except Exception as e:
+                st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
+        
+        if not df_list:
             st.stop()
+            
+        # [수정됨] 여러 파일을 하나로 병합
+        df = pd.concat(df_list, ignore_index=True)
 
         idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
         idx_name = get_col_idx(df, ["구간명"], exact=True)
@@ -169,7 +172,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         
         num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-        st.success("✅ 전산 파일 업로드 완료! 사이드바의 변수를 전산 시스템과 동일하게 세팅해 보세요.")
+        st.success("✅ 여러 개의 전산 파일 병합 및 업로드 완료! 사이드바의 변수를 세팅해 보세요.")
 
         def get_analysis_result(row):
             npv, irr, irr_msg, _ = calculate_simulation(
@@ -178,9 +181,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             )
             return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
 
-        # ---------------------------------------------------------
-        # UI Section 1: 요약 표
-        # ---------------------------------------------------------
         st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
         
         usage_results = []
@@ -216,9 +216,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             use_container_width=True
         )
 
-        # ---------------------------------------------------------
-        # 필터링 및 소계/상세 계산
-        # ---------------------------------------------------------
         selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
 
         if selected_usages:
@@ -262,24 +259,30 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
     st.title("📋 배관 투자 승인 내역 자동 생성기")
-    st.markdown("기초자료(1차, 2차) 엑셀/CSV 파일을 업로드하면 품의서 양식에 맞게 데이터를 자동 병합합니다.")
+    st.markdown("기초자료 엑셀/CSV 파일을 업로드하면 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
+    
+    # 2026년 사업계획 투자한도액 세팅 (필요시 화면에서 바로 수정 가능하도록 구성)
+    budget_2026 = st.number_input("💰 2026년 사업계획 투자한도액 (원)", value=10000000000, step=10000000, format="%d")
 
-    uploaded_files = st.file_uploader("기초자료 파일을 여러 개 업로드 해주세요", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
+    uploaded_files = st.file_uploader("기초자료 파일 업로드 (1차, 2차 등 여러 개 선택)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
 
     if uploaded_files:
         all_data = []
+        
+        # 파일별 차수와 투자비 추적을 위한 변수
+        max_cha = 0
+        current_inv_amount = 0
+        total_inv_amount = 0
+        
         for file in uploaded_files:
             try:
-                # 엑셀 상단의 병합된 불필요한 행을 건너뛰고 3번째 행(인덱스 2)부터 읽기
                 if file.name.endswith('.csv'):
                     df = pd.read_csv(file, skiprows=2, encoding='utf-8-sig') 
                 else:
                     df = pd.read_excel(file, skiprows=2)
 
-                # 컬럼명에 섞여 있는 공백 제거 (유연한 매칭을 위함)
                 df.columns = df.columns.astype(str).str.replace(" ", "")
 
-                # 포함할 주요 키워드로 컬럼 찾기
                 def find_col(keyword):
                     for col in df.columns:
                         if keyword in col:
@@ -298,29 +301,58 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                 if col_name:
                     extracted['공사명'] = df[col_name]
-                    extracted['투자비(원)'] = df[col_inv] if col_inv else 0
-                    extracted['가정용 판매량(MJ)'] = df[col_home] if col_home else 0
-                    extracted['일반용 판매량(MJ)'] = df[col_general] if col_general else 0
-                    extracted['합계 판매량(MJ)'] = df[col_total_vol] if col_total_vol else 0
-                    extracted['NPV(원)'] = df[col_npv] if col_npv else 0
-                    extracted['IRR(%)'] = df[col_irr] if col_irr else 0
+                    extracted['투자비(원)'] = pd.to_numeric(df[col_inv], errors='coerce').fillna(0) if col_inv else 0
+                    extracted['가정용 판매량(MJ)'] = pd.to_numeric(df[col_home], errors='coerce').fillna(0) if col_home else 0
+                    extracted['일반용 판매량(MJ)'] = pd.to_numeric(df[col_general], errors='coerce').fillna(0) if col_general else 0
+                    extracted['합계 판매량(MJ)'] = pd.to_numeric(df[col_total_vol], errors='coerce').fillna(0) if col_total_vol else 0
+                    extracted['NPV(원)'] = pd.to_numeric(df[col_npv], errors='coerce').fillna(0) if col_npv else 0
+                    extracted['IRR(%)'] = pd.to_numeric(df[col_irr], errors='coerce').fillna(0) if col_irr else 0
 
-                    # 공사명이 없는 빈 데이터 제거 및 헤더 잔재 정리
                     extracted = extracted.dropna(subset=['공사명'])
                     extracted = extracted[~extracted['공사명'].isin(['구간명', 'nan', ''])]
                     
                     all_data.append(extracted)
+                    
+                    # 파일명에서 차수 추출 (예: '기초자료_2차' -> 2)
+                    match = re.search(r'(\d+)차', file.name)
+                    file_cha = int(match.group(1)) if match else 1
+                    
+                    file_total_inv = extracted['투자비(원)'].sum()
+                    total_inv_amount += file_total_inv
+                    
+                    # 가장 높은 차수의 금액을 '금회 신청 내역'으로 산출
+                    if file_cha > max_cha:
+                        max_cha = file_cha
+                        current_inv_amount = file_total_inv
+                    elif file_cha == max_cha:
+                        current_inv_amount += file_total_inv
 
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
         
         if all_data:
+            # 1. 상단 투자 한도 요약 테이블 표출
+            st.subheader("📊 2026년 배관 투자 승인 요약")
+            summary_df = pd.DataFrame({
+                "구분": ["2026년 사업계획 투자한도액", f"금회 신청 내역 ({max_cha}차)", "2026년 본부투자 누계", "잔여 한도액"],
+                "금액(원)": [
+                    budget_2026, 
+                    current_inv_amount, 
+                    total_inv_amount, 
+                    budget_2026 - total_inv_amount
+                ]
+            })
+            
+            # 가로 형태로 깔끔하게 표출
+            st.dataframe(summary_df.style.format({"금액(원)": "{:,.0f}"}), hide_index=True, use_container_width=True)
+            
+            st.divider()
+            
+            # 2. 하단 전체 상세 내역 표출
+            st.subheader(f"📝 {max_cha}차 누계 상세 승인 내역")
             final_df = pd.concat(all_data, ignore_index=True)
-            final_df.index = final_df.index + 1  # No. 용도로 1부터 시작
+            final_df.index = final_df.index + 1 
             
-            st.success("✅ 여러 기초자료 데이터의 병합이 완료되었습니다!")
-            
-            # 숫자 포맷 깔끔하게 지정해서 출력
             st.dataframe(final_df.style.format({
                 "투자비(원)": "{:,.0f}",
                 "가정용 판매량(MJ)": "{:,.0f}",
@@ -330,11 +362,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 "IRR(%)": "{:,.2f}"
             }), use_container_width=True)
             
-            # CSV 다운로드 버튼
             csv_data = final_df.to_csv(index=True).encode('utf-8-sig')
             st.download_button(
-                label="📥 취합된 승인내역 CSV 다운로드",
+                label="📥 상세 승인내역 CSV 다운로드",
                 data=csv_data,
-                file_name="배관투자_승인내역_최종.csv",
+                file_name=f"배관투자_승인내역_{max_cha}차_최종.csv",
                 mime="text/csv"
             )

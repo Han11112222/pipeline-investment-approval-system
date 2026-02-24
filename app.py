@@ -109,6 +109,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         clean_df_list = []
         for file in uploaded_files:
             try:
+                file.seek(0) # 파일 포인터 초기화
                 match = re.search(r'(\d+)차', file.name)
                 cha_num = int(match.group(1)) if match else 1
 
@@ -340,60 +341,64 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             
         st.markdown("---")
 
-        # ==== 1. 데이터 추출 (수정: A열, F열, G열 강제 지정 및 ffill 적용) ====
+        # ==== 1. 데이터 추출 (A=0, F=5, G=6 강제 지정 및 ffill 적용) ====
         all_data_unfiltered = []
         
         for file in uploaded_files:
             try:
+                # [수정] 파일 포인터를 다시 0으로 돌려서 빈 껍데기를 읽는 버그 해결!
+                file.seek(0)
+                
                 match = re.search(r'(\d+)차', file.name)
                 file_cha = int(match.group(1)) if match else 1
                 
                 if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, header=None, encoding='utf-8-sig') 
+                    df = pd.read_csv(file, header=None) 
                 else:
                     df = pd.read_excel(file, header=None)
 
-                # [사용자 지시사항] A열=0(용도), F열=5(규모), G열=6(투자비) 고정
-                idx_usage = 0  
-                idx_len = 5    
-                idx_inv = 6    
+                extracted = pd.DataFrame()
+                extracted['차수'] = file_cha
                 
+                # [수정] A열(0) = 용도 지정 및 빈칸 채우기(ffill) 완벽 적용
+                extracted['항목'] = df.iloc[:, 0].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
+                
+                # [수정] F열(5) = 규모, G열(6) = 금액 지정
+                if df.shape[1] > 6:
+                    extracted['규모(m)'] = df.iloc[:, 5]
+                    extracted['투자비(원)'] = df.iloc[:, 6]
+                else:
+                    extracted['규모(m)'] = 0
+                    extracted['투자비(원)'] = 0
+
+                # 공사명은 get_col_idx로 유연하게 찾되 못 찾으면 B열(1) 사용
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
+                extracted['공사명'] = df.iloc[:, idx_name] if idx_name is not None else df.iloc[:, 1]
+                
+                # 나머지 참고용 데이터 (NPV 등)
                 idx_home = get_col_idx(df, ["가정용"], exact=False)
                 idx_general = get_col_idx(df, ["일반용"], exact=False)
                 idx_total_vol = get_col_idx(df, ["계(MJ)", "계"], exact=False)
                 idx_npv = get_col_idx(df, ["NPV"], exact=False)
                 idx_irr = get_col_idx(df, ["IRR"], exact=False)
 
-                if idx_name is not None:
-                    extracted = pd.DataFrame()
-                    extracted['차수'] = file_cha
-                    extracted['공사명'] = df.iloc[:, idx_name]
-                    extracted['항목'] = df.iloc[:, idx_usage] # A열 고정
-                    extracted['규모(m)'] = df.iloc[:, idx_len] # F열 고정
-                    extracted['투자비(원)'] = df.iloc[:, idx_inv] # G열 고정
-                    extracted['가정용 판매량(MJ)'] = df.iloc[:, idx_home] if idx_home is not None else 0
-                    extracted['일반용 판매량(MJ)'] = df.iloc[:, idx_general] if idx_general is not None else 0
-                    extracted['합계 판매량(MJ)'] = df.iloc[:, idx_total_vol] if idx_total_vol is not None else 0
-                    extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
-                    extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
+                extracted['가정용 판매량(MJ)'] = df.iloc[:, idx_home] if idx_home is not None else 0
+                extracted['일반용 판매량(MJ)'] = df.iloc[:, idx_general] if idx_general is not None else 0
+                extracted['합계 판매량(MJ)'] = df.iloc[:, idx_total_vol] if idx_total_vol is not None else 0
+                extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
+                extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
 
-                    # [핵심] 엑셀 병합(Merge) 셀 해결: 위에 있는 용도 텍스트를 빈칸에 채워 넣기 (ffill)
-                    extracted['항목'] = extracted['항목'].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
-
-                    # 쓰레기 데이터 정리
-                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
-                    invalid_names = ['', '0', 'nan', 'None', '구간명']
-                    extracted = extracted[~extracted['공사명'].isin(invalid_names)]
+                # 쓰레기 값 제거 (소계, 합계 행 등 제거)
+                extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
+                invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계']
+                extracted = extracted[~extracted['공사명'].isin(invalid_names)]
+                
+                # 숫자형으로 변환 (콤마 제거)
+                num_cols_ext = ['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
+                for c in num_cols_ext:
+                    extracted[c] = pd.to_numeric(extracted[c].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
                     
-                    # 숫자형 변환
-                    num_cols_ext = ['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
-                    for c in num_cols_ext:
-                        if extracted[c].dtype == object:
-                            extracted[c] = extracted[c].astype(str).str.replace(',', '', regex=False)
-                        extracted[c] = pd.to_numeric(extracted[c], errors='coerce').fillna(0)
-                        
-                    all_data_unfiltered.append(extracted)
+                all_data_unfiltered.append(extracted)
 
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
@@ -401,6 +406,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         # ==== 2. 수요개발배관 파일 자동 매핑을 위한 그룹핑 ====
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
+            # 항목명 매칭을 위해 띄어쓰기 전부 제거
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
             # 기승인 (선택 차수보다 작은 차수들의 누계)
@@ -427,14 +433,14 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
                 # 기승인 매핑
                 if not prev_agg.empty:
-                    matched_idx = [idx for idx in prev_agg.index if item_clean in str(idx).replace(' ', '') or str(idx).replace(' ', '') in item_clean]
+                    matched_idx = [idx for idx in prev_agg.index if item_clean in str(idx) or str(idx) in item_clean]
                     if matched_idx:
                         df_base.at[i, '기승인_규모'] = prev_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '기승인_금액'] = prev_agg.loc[matched_idx, '투자비(원)'].sum()
                 
                 # 금회 매핑
                 if not curr_agg.empty:
-                    matched_idx = [idx for idx in curr_agg.index if item_clean in str(idx).replace(' ', '') or str(idx).replace(' ', '') in item_clean]
+                    matched_idx = [idx for idx in curr_agg.index if item_clean in str(idx) or str(idx) in item_clean]
                     if matched_idx:
                         df_base.at[i, '금회_규모'] = curr_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '금회_금액'] = curr_agg.loc[matched_idx, '투자비(원)'].sum()
@@ -552,8 +558,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 detail_df = detail_df.reset_index(drop=True)
                 detail_df.index = detail_df.index + 1 
                 
-                display_cols = ['차수', '공사명', '항목', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
+                display_cols = ['차수', '공사명', '항목', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
                 st.dataframe(detail_df[display_cols].style.format({
+                    "규모(m)": "{:,.0f}",
                     "투자비(원)": "{:,.0f}",
                     "가정용 판매량(MJ)": "{:,.0f}",
                     "일반용 판매량(MJ)": "{:,.0f}",

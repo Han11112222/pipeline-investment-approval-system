@@ -340,18 +340,14 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             view_mode_t2 = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"], key="view_mode_t2")
 
         if view_mode_t2 == "1. 당해차수 데이터":
-            st.info(f"선택됨: **{selected_cha_t2}차** 당해차수 데이터만 상세 내역에 출력합니다.")
+            st.info(f"선택됨: **{selected_cha_t2}차** 당해차수 데이터만 하단 상세 내역에 출력합니다.")
         else:
-            st.info(f"선택됨: **1차 부터 {selected_cha_t2}차 까지의 누적** 데이터를 상세 내역에 출력합니다.")
+            st.info(f"선택됨: **1차 부터 {selected_cha_t2}차 까지의 누적** 데이터를 하단 상세 내역에 출력합니다.")
             
         st.markdown("---")
 
-        # ==== 데이터 추출 로직 ====
-        all_data = []
-        current_inv_scale = 0
-        current_inv_amount = 0
-        total_inv_scale = 0
-        total_inv_amount = 0
+        # ==== 1. 데이터 추출 (항목 매핑 및 차수별 분류) ====
+        all_data_unfiltered = []
         
         for file in uploaded_files:
             try:
@@ -381,10 +377,13 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 col_total_vol = find_col('계(MJ)')
                 col_npv = find_col('NPV')
                 col_irr = find_col('IRR')
+                # 항목 맵핑을 위한 컬럼 찾기
+                col_category = find_col('항목') or find_col('구분') or find_col('용도') or find_col('가스용도') or find_col('투자내역')
 
                 if col_name:
                     extracted['차수'] = file_cha
                     extracted['공사명'] = df[col_name]
+                    extracted['항목'] = df[col_category] if col_category else '미분류'
                     extracted['규모(m)'] = pd.to_numeric(df[col_len], errors='coerce').fillna(0) if col_len else 0
                     extracted['투자비(원)'] = pd.to_numeric(df[col_inv], errors='coerce').fillna(0) if col_inv else 0
                     extracted['가정용 판매량(MJ)'] = pd.to_numeric(df[col_home], errors='coerce').fillna(0) if col_home else 0
@@ -396,61 +395,103 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted = extracted.dropna(subset=['공사명'])
                     extracted = extracted[~extracted['공사명'].isin(['구간명', 'nan', ''])]
                     
-                    file_total_scale = extracted['규모(m)'].sum()
-                    file_total_inv = extracted['투자비(원)'].sum()
-
-                    if file_cha <= selected_cha_t2:
-                        total_inv_scale += file_total_scale
-                        total_inv_amount += file_total_inv
-                        if file_cha == selected_cha_t2:
-                            current_inv_scale += file_total_scale
-                            current_inv_amount += file_total_inv
-
-                    if view_mode_t2 == "1. 당해차수 데이터":
-                        if file_cha == selected_cha_t2:
-                            all_data.append(extracted)
-                    else:
-                        if file_cha <= selected_cha_t2:
-                            all_data.append(extracted)
+                    all_data_unfiltered.append(extracted)
 
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
 
-        # ==== 우측 메인 화면: 엑셀과 100% 동일한 구조의 종합 표 표출 ====
+        # ==== 2. 항목별 기승인(이전), 금회(현재), 누계(전체) 그룹핑 연산 ====
+        if all_data_unfiltered:
+            all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
+            all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
+            
+            prev_df = all_parsed_df[all_parsed_df['차수'] < selected_cha_t2]
+            curr_df = all_parsed_df[all_parsed_df['차수'] == selected_cha_t2]
+            
+            prev_agg = prev_df.groupby('항목_clean')[['규모(m)', '투자비(원)']].sum()
+            curr_agg = curr_df.groupby('항목_clean')[['규모(m)', '투자비(원)']].sum()
+        else:
+            all_parsed_df = pd.DataFrame()
+            prev_agg = pd.DataFrame()
+            curr_agg = pd.DataFrame()
+
+        # 표 데이터를 채워넣고 엑셀 수식(기승인 + 금회 = 누계)을 실행하는 함수
+        def fill_metrics(df_base):
+            for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
+                df_base[col] = 0.0
+                
+            for i in range(len(df_base)):
+                item_raw = df_base.at[i, '항목']
+                if item_raw == '소계': continue
+                item_clean = str(item_raw).replace('\n', '').replace(' ', '')
+                
+                # 기승인 (이전 차수까지의 합)
+                if not prev_agg.empty and item_clean in prev_agg.index:
+                    df_base.at[i, '기승인_규모'] = prev_agg.at[item_clean, '규모(m)']
+                    df_base.at[i, '기승인_금액'] = prev_agg.at[item_clean, '투자비(원)']
+                
+                # 금회 (현재 차수의 합)
+                if not curr_agg.empty and item_clean in curr_agg.index:
+                    df_base.at[i, '금회_규모'] = curr_agg.at[item_clean, '규모(m)']
+                    df_base.at[i, '금회_금액'] = curr_agg.at[item_clean, '투자비(원)']
+                
+                # [수식 적용] 누계 = 기승인 + 금회
+                df_base.at[i, '누계_규모'] = df_base.at[i, '기승인_규모'] + df_base.at[i, '금회_규모']
+                df_base.at[i, '누계_금액'] = df_base.at[i, '기승인_금액'] + df_base.at[i, '금회_금액']
+                
+            # 소계 행 계산
+            sub_idx = len(df_base) - 1
+            for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
+                df_base.at[sub_idx, col] = df_base.iloc[:-1][col].sum()
+                
+            # [수식 적용] 잔여 금액 = 한도 금액 - 누계 금액
+            df_base['잔여_금액'] = df_base['한도_금액'] - df_base['누계_금액']
+            return df_base
+
         st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
-        
-        prev_inv_scale = total_inv_scale - current_inv_scale
-        prev_inv_amt = total_inv_amount - current_inv_amount
 
         # 1. 수요개발배관 프레임 구성
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
-        for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
-            df_sd_display[col] = 0
-        df_sd_display['잔여_금액'] = df_sd_display['한도_금액']
-        df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', sd_scale_sub, sd_amt_sub, 0, 0, 0, 0, 0, 0, sd_amt_sub]
+        df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', sd_scale_sub, sd_amt_sub] 
+        df_sd_display = fill_metrics(df_sd_display)
         
         # 2. 기본계획배관 프레임 구성
         df_bp_display = edited_bp.copy()
         df_bp_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_bp_display.insert(0, '구분', '기본계획배관')
-        for col in ['기승인_규모', '기승인_금액', '금회_규모', '금회_금액', '누계_규모', '누계_금액']:
-            df_bp_display[col] = 0
-        df_bp_display['잔여_금액'] = df_bp_display['한도_금액']
-        df_bp_display.loc[len(df_bp_display)] = ['기본계획배관', '소계', bp_scale_sub, bp_amt_sub, 0, 0, 0, 0, 0, 0, bp_amt_sub]
+        df_bp_display.loc[len(df_bp_display)] = ['기본계획배관', '소계', bp_scale_sub, bp_amt_sub]
+        df_bp_display = fill_metrics(df_bp_display)
         
         # 3. 전체 프레임 병합
         df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
         
-        # 4. 총계 행 추가
+        # 4. 총계 행(Total) 수식 계산 및 추가
+        sd_sub_idx = len(df_sd_display) - 1
+        bp_sub_idx = len(df_bp_display) - 1
+        
+        tot_limit_scale = df_sd_display.at[sd_sub_idx, '한도_규모'] + df_bp_display.at[bp_sub_idx, '한도_규모']
+        tot_limit_amt = df_sd_display.at[sd_sub_idx, '한도_금액'] + df_bp_display.at[bp_sub_idx, '한도_금액']
+        
+        tot_prev_scale = df_sd_display.at[sd_sub_idx, '기승인_규모'] + df_bp_display.at[bp_sub_idx, '기승인_규모']
+        tot_prev_amt = df_sd_display.at[sd_sub_idx, '기승인_금액'] + df_bp_display.at[bp_sub_idx, '기승인_금액']
+        
+        tot_curr_scale = df_sd_display.at[sd_sub_idx, '금회_규모'] + df_bp_display.at[bp_sub_idx, '금회_규모']
+        tot_curr_amt = df_sd_display.at[sd_sub_idx, '금회_금액'] + df_bp_display.at[bp_sub_idx, '금회_금액']
+        
+        tot_cum_scale = df_sd_display.at[sd_sub_idx, '누계_규모'] + df_bp_display.at[bp_sub_idx, '누계_규모']
+        tot_cum_amt = df_sd_display.at[sd_sub_idx, '누계_금액'] + df_bp_display.at[bp_sub_idx, '누계_금액']
+        
+        tot_remain_amt = df_sd_display.at[sd_sub_idx, '잔여_금액'] + df_bp_display.at[bp_sub_idx, '잔여_금액']
+
         df_budget_detail.loc[len(df_budget_detail)] = [
             '합계', '총계', 
-            sd_scale_sub + bp_scale_sub, budget_2026,          
-            prev_inv_scale, prev_inv_amt,                      
-            current_inv_scale, current_inv_amount,             
-            total_inv_scale, total_inv_amount,                 
-            budget_2026 - total_inv_amount                     
+            tot_limit_scale, tot_limit_amt,          
+            tot_prev_scale, tot_prev_amt,                      
+            tot_curr_scale, tot_curr_amt,             
+            tot_cum_scale, tot_cum_amt,                 
+            tot_remain_amt                     
         ]
 
         # 5. [신규] 승인비율 산출 (누계 금액 / 한도 금액 * 100)
@@ -460,7 +501,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             0
         )
         
-        # 6. [신규] 엑셀 셀 병합 효과 (중복되는 '구분' 텍스트 지우기)
+        # 6. [신규] 엑셀 셀 병합 효과 (중복되는 '구분' 텍스트 공란 처리)
         df_budget_detail['구분'] = df_budget_detail['구분'].mask(df_budget_detail['구분'].duplicated(), '')
 
         # 7. 엑셀 원본과 동일한 MultiIndex 헤더 생성 (+ 승인비율 추가)
@@ -469,8 +510,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             ('항목', ''),
             ('2026년 사업계획 투자한도액', '규모(m)'),
             ('2026년 사업계획 투자한도액', '금액'),
-            ('2026년 본부투자 승인내역', '규모(m)'),
-            ('2026년 본부투자 승인내역', '금액'),
+            ('2026년 본부투자 승인내역 (기승인)', '규모(m)'),
+            ('2026년 본부투자 승인내역 (기승인)', '금액'),
             (f'금회 신청 내역 ({selected_cha_t2}차)', '규모(m)'),
             (f'금회 신청 내역 ({selected_cha_t2}차)', '금액'),
             ('2026년 본부투자 누계', '규모(m)'),
@@ -479,14 +520,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             ('승인비율', '(%)')
         ])
 
-        # 8. [신규] 소계 & 합계 색상 하이라이트 함수 적용
+        # 8. [신규] 소계 & 합계 색상 하이라이트 스타일 함수
         def style_rows(row):
             if row[('항목', '')] == '소계':
-                # 연한 파란색
-                return ['background-color: #E6F3FF; font-weight: bold'] * len(row)
+                return ['background-color: #E6F3FF; font-weight: bold'] * len(row) # 연한 파란색
             elif row[('항목', '')] == '총계':
-                # 연한 빨간색
-                return ['background-color: #FFE6E6; font-weight: bold'] * len(row)
+                return ['background-color: #FFE6E6; font-weight: bold; color: #D32F2F'] * len(row) # 연한 빨간색 & 진한 글씨
             return [''] * len(row)
 
         # 천 단위 콤마 포맷 & 승인비율 % 포맷 지정
@@ -499,31 +538,39 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
         
-        # ==== 하단: 선택된 차수의 상세 데이터 표출 ====
-        if all_data:
-            detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
-            st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역")
-            
-            final_df = pd.concat(all_data, ignore_index=True)
-            final_df.index = final_df.index + 1 
-            
-            display_cols = ['공사명', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
-            st.dataframe(final_df[display_cols].style.format({
-                "투자비(원)": "{:,.0f}",
-                "가정용 판매량(MJ)": "{:,.0f}",
-                "일반용 판매량(MJ)": "{:,.0f}",
-                "합계 판매량(MJ)": "{:,.0f}",
-                "NPV(원)": "{:,.0f}",
-                "IRR(%)": "{:,.2f}"
-            }), use_container_width=True)
-            
-            csv_data = final_df[display_cols].to_csv(index=True).encode('utf-8-sig')
-            st.download_button(
-                label="📥 상세 승인내역 CSV 다운로드",
-                data=csv_data,
-                file_name=f"2026년도_배관투자_승인내역_{detail_title_prefix}.csv",
-                mime="text/csv"
-            )
+        # ==== 하단: 필터링 조건에 맞는 상세 데이터 표출 ====
+        if not all_parsed_df.empty:
+            if view_mode_t2 == "1. 당해차수 데이터":
+                detail_df = all_parsed_df[all_parsed_df['차수'] == selected_cha_t2]
+            else:
+                detail_df = all_parsed_df[all_parsed_df['차수'] <= selected_cha_t2]
+                
+            if not detail_df.empty:
+                detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
+                st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역")
+                
+                detail_df = detail_df.reset_index(drop=True)
+                detail_df.index = detail_df.index + 1 
+                
+                display_cols = ['차수', '공사명', '항목', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
+                st.dataframe(detail_df[display_cols].style.format({
+                    "투자비(원)": "{:,.0f}",
+                    "가정용 판매량(MJ)": "{:,.0f}",
+                    "일반용 판매량(MJ)": "{:,.0f}",
+                    "합계 판매량(MJ)": "{:,.0f}",
+                    "NPV(원)": "{:,.0f}",
+                    "IRR(%)": "{:,.2f}"
+                }), use_container_width=True)
+                
+                csv_data = detail_df[display_cols].to_csv(index=True).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 상세 승인내역 CSV 다운로드",
+                    data=csv_data,
+                    file_name=f"2026년도_배관투자_승인내역_{detail_title_prefix}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("해당 차수에 추출된 세부 공사 내역이 없습니다.")
         else:
             st.info("조건에 맞는 데이터가 없습니다.")
     else:

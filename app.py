@@ -288,11 +288,37 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 # 탭 2: 신규 배관 투자 승인 내역 자동화
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
+    
+    # --- 탭 2 전용 좌측 사이드바 하단 UI 구성 ---
+    with st.sidebar:
+        st.header("💰 2026년 사업계획 투자한도액")
+        st.markdown("표에 항목별 **[규모]**와 **[금액]**을 입력하세요.")
+        
+        st.subheader("🔹 수요개발배관")
+        df_sd_base = pd.DataFrame({
+            "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
+            "규모": [0, 0, 0, 0, 0, 0, 0, 0],
+            "금액": [0, 0, 0, 0, 0, 0, 0, 0]
+        })
+        # 데이터 에디터로 수정 가능하게 표출
+        edited_sd = st.data_editor(df_sd_base, key="sd_editor", hide_index=True, use_container_width=True)
+        
+        st.subheader("🔹 기본계획배관")
+        df_bp_base = pd.DataFrame({
+            "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "인입배관", "공급시설물 개선"],
+            "규모": [0, 0, 0, 0, 0, 0],
+            "금액": [0, 0, 0, 0, 0, 0]
+        })
+        # 데이터 에디터로 수정 가능하게 표출
+        edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
+        
+        # 합산 예산 계산
+        budget_2026 = int(edited_sd['금액'].sum() + edited_bp['금액'].sum())
+        st.info(f"✅ 총 사업계획 투자한도액: **{budget_2026:,.0f} 원**")
+
+    # --- 메인 화면 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
     st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
-    
-    # 2026년 사업계획 투자한도액 세팅
-    budget_2026 = st.number_input("💰 2026년 사업계획 투자한도액 (원)", value=10000000000, step=10000000, format="%d")
 
     if uploaded_files:
         all_data = []

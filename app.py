@@ -288,65 +288,96 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     # --- 탭 2 전용 좌측 사이드바 하단 UI 구성 ---
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액")
-        st.markdown("아래 표에 항목별 **[규모]**와 **[금액]** 디폴트값을 확인/수정하세요.")
+        st.markdown("아래 표에 항목별 **[규모]**와 **[금액]**을 입력하세요.")
         
         st.subheader("🔹 수요개발배관")
-        # [수정] 업로드해주신 데이터를 바탕으로 디폴트 값 완벽 반영 완료!
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
             "규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
             "금액": [1055430560, 851196752, 287568274, 439429508, 182956113, 610435480, 0, 1695844012]  
         })
         edited_sd = st.data_editor(df_sd_base, key="sd_editor", hide_index=True, use_container_width=True)
+        # 수요개발배관 소계 계산 및 천단위 콤마 표출
+        sd_scale_sub = edited_sd['규모'].sum()
+        sd_amt_sub = edited_sd['금액'].sum()
+        st.markdown(f"<div style='text-align: right; color: #1E88E5;'><b>소계 ➔ 규모: {sd_scale_sub:,.0f} / 금액: {sd_amt_sub:,.0f}</b></div>", unsafe_allow_html=True)
         
+        st.divider()
+
         st.subheader("🔹 기본계획배관")
-        # [수정] 업로드해주신 데이터를 바탕으로 디폴트 값 완벽 반영 완료!
         df_bp_base = pd.DataFrame({
             "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "인입배관", "공급시설물 개선"],
             "규모": [2828, 749, 624, 3, 857, 95], 
             "금액": [2031952014, 626987840, 766452499, 338045023, 3230129038, 2749999724]  
         })
         edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
+        # 기본계획배관 소계 계산 및 천단위 콤마 표출
+        bp_scale_sub = edited_bp['규모'].sum()
+        bp_amt_sub = edited_bp['금액'].sum()
+        st.markdown(f"<div style='text-align: right; color: #1E88E5;'><b>소계 ➔ 규모: {bp_scale_sub:,.0f} / 금액: {bp_amt_sub:,.0f}</b></div>", unsafe_allow_html=True)
         
         # 합산 예산 계산 (총 투자한도액)
-        budget_2026 = int(edited_sd['금액'].sum() + edited_bp['금액'].sum())
-        st.info(f"✅ 총 사업계획 투자한도액: **{budget_2026:,.0f} 원**")
+        budget_2026 = int(sd_amt_sub + bp_amt_sub)
 
     # --- 메인 화면 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
     st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
 
-    # ==== 우측 메인 화면 상단: 디폴트값 기반 2026년 사업계획 투자한도액 세부 구성 표 표출 ====
-    st.subheader("📌 2026년 사업계획 투자한도액 세부 구성")
-    
-    # 수요개발배관, 기본계획배관 데이터 병합
-    df_sd_display = edited_sd.copy()
-    df_sd_display.insert(0, '구분', '수요개발배관')
-    
-    df_bp_display = edited_bp.copy()
-    df_bp_display.insert(0, '구분', '기본계획배관')
-    
-    df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
-    
-    # 총 합계 행 추가
-    total_scale = df_budget_detail['규모'].sum()
-    total_amount = df_budget_detail['금액'].sum()
-    df_budget_detail.loc[len(df_budget_detail)] = ['합계', '총계', total_scale, total_amount]
-    
-    # 표 렌더링 (천 단위 콤마 포맷팅)
-    st.dataframe(df_budget_detail.style.format({"규모": "{:,.0f}", "금액": "{:,.0f}"}), hide_index=True, use_container_width=True)
-    st.divider()
-
-    # 이하 기존 승인 내역 로직
     if uploaded_files:
-        all_data = []
+        # ==== 신규 기능: 1번째 탭처럼 차수 필터링 UI (메인 화면 최상단) ====
+        st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
+        st.markdown("---")
         
-        max_cha = 0
-        current_inv_amount = 0
-        total_inv_amount = 0
+        chas = []
+        for f in uploaded_files:
+            m = re.search(r'(\d+)차', f.name)
+            chas.append(int(m.group(1)) if m else 1)
+        available_chas_t2 = sorted(list(set(chas)))
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_cha_t2 = st.selectbox("📌 기준 차수 선택 (승인 내역용)", available_chas_t2, index=len(available_chas_t2)-1, format_func=lambda x: f"{x}차")
+        with col2:
+            view_mode_t2 = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"], key="view_mode_t2")
+
+        if view_mode_t2 == "1. 당해차수 데이터":
+            st.info(f"선택됨: **{selected_cha_t2}차** 당해차수 데이터만 상세 내역에 출력합니다.")
+        else:
+            st.info(f"선택됨: **1차 부터 {selected_cha_t2}차 까지의 누적** 데이터를 상세 내역에 출력합니다.")
+            
+        st.markdown("---")
+
+        # ==== 우측 메인 화면 상단: 디폴트값 기반 2026년 사업계획 투자한도액 세부 구성 표 표출 ====
+        st.subheader("📌 2026년 사업계획 투자한도액 세부 구성")
+        
+        # 1. 수요개발배관 원본 + 소계 병합
+        df_sd_display = edited_sd.copy()
+        df_sd_display.insert(0, '구분', '수요개발배관')
+        df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', sd_scale_sub, sd_amt_sub]
+        
+        # 2. 기본계획배관 원본 + 소계 병합
+        df_bp_display = edited_bp.copy()
+        df_bp_display.insert(0, '구분', '기본계획배관')
+        df_bp_display.loc[len(df_bp_display)] = ['기본계획배관', '소계', bp_scale_sub, bp_amt_sub]
+        
+        # 3. 전체 병합 및 총계 산출 (엑셀 원본 구조 100% 반영)
+        df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
+        df_budget_detail.loc[len(df_budget_detail)] = ['합계', '총계', sd_scale_sub + bp_scale_sub, budget_2026]
+        
+        # 표 렌더링 (천 단위 콤마 포맷팅)
+        st.dataframe(df_budget_detail.style.format({"규모": "{:,.0f}", "금액": "{:,.0f}"}), hide_index=True, use_container_width=True)
+        st.divider()
+
+        # 데이터 추출 로직
+        all_data = []
+        current_inv_amount = 0 # 선택된 차수(당해)의 합
+        total_inv_amount = 0   # 누계 합
         
         for file in uploaded_files:
             try:
+                match = re.search(r'(\d+)차', file.name)
+                file_cha = int(match.group(1)) if match else 1
+                
                 if file.name.endswith('.csv'):
                     df = pd.read_csv(file, skiprows=2, encoding='utf-8-sig') 
                 else:
@@ -371,6 +402,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 col_irr = find_col('IRR')
 
                 if col_name:
+                    extracted['차수'] = file_cha
                     extracted['공사명'] = df[col_name]
                     extracted['투자비(원)'] = pd.to_numeric(df[col_inv], errors='coerce').fillna(0) if col_inv else 0
                     extracted['가정용 판매량(MJ)'] = pd.to_numeric(df[col_home], errors='coerce').fillna(0) if col_home else 0
@@ -382,20 +414,20 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted = extracted.dropna(subset=['공사명'])
                     extracted = extracted[~extracted['공사명'].isin(['구간명', 'nan', ''])]
                     
-                    all_data.append(extracted)
-                    
-                    # 차수 및 금액 산출
-                    match = re.search(r'(\d+)차', file.name)
-                    file_cha = int(match.group(1)) if match else 1
-                    
+                    # 기준 차수 누계액 계산
                     file_total_inv = extracted['투자비(원)'].sum()
-                    total_inv_amount += file_total_inv
-                    
-                    if file_cha > max_cha:
-                        max_cha = file_cha
-                        current_inv_amount = file_total_inv
-                    elif file_cha == max_cha:
-                        current_inv_amount += file_total_inv
+                    if file_cha <= selected_cha_t2:
+                        total_inv_amount += file_total_inv
+                        if file_cha == selected_cha_t2:
+                            current_inv_amount += file_total_inv
+
+                    # 보기 옵션(필터링) 적용 후 데이터 저장
+                    if view_mode_t2 == "1. 당해차수 데이터":
+                        if file_cha == selected_cha_t2:
+                            all_data.append(extracted)
+                    else:
+                        if file_cha <= selected_cha_t2:
+                            all_data.append(extracted)
 
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
@@ -403,7 +435,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         if all_data:
             st.subheader("📊 2026년 배관 투자 승인 요약")
             summary_df = pd.DataFrame({
-                "구분": ["2026년 사업계획 투자한도액", f"금회 신청 내역 ({max_cha}차)", "2026년 본부투자 누계", "잔여 한도액"],
+                "구분": ["2026년 사업계획 투자한도액", f"금회 신청 내역 ({selected_cha_t2}차)", "2026년 본부투자 누계", "잔여 한도액"],
                 "금액(원)": [
                     budget_2026, 
                     current_inv_amount, 
@@ -416,11 +448,15 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             
             st.divider()
             
-            st.subheader(f"📝 {max_cha}차 누계 상세 승인 내역")
+            detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
+            st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역")
+            
             final_df = pd.concat(all_data, ignore_index=True)
             final_df.index = final_df.index + 1 
             
-            st.dataframe(final_df.style.format({
+            # 화면 출력에서 '차수' 컬럼은 숨기고(필요시) 표출
+            display_cols = ['공사명', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
+            st.dataframe(final_df[display_cols].style.format({
                 "투자비(원)": "{:,.0f}",
                 "가정용 판매량(MJ)": "{:,.0f}",
                 "일반용 판매량(MJ)": "{:,.0f}",
@@ -429,12 +465,14 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 "IRR(%)": "{:,.2f}"
             }), use_container_width=True)
             
-            csv_data = final_df.to_csv(index=True).encode('utf-8-sig')
+            csv_data = final_df[display_cols].to_csv(index=True).encode('utf-8-sig')
             st.download_button(
                 label="📥 상세 승인내역 CSV 다운로드",
                 data=csv_data,
-                file_name=f"2026년도_배관투자_승인내역_{max_cha}차_누계.csv",
+                file_name=f"2026년도_배관투자_승인내역_{detail_title_prefix}.csv",
                 mime="text/csv"
             )
+        else:
+            st.info("조건에 맞는 데이터가 없습니다.")
     else:
         st.info("👆 좌측 메뉴바 상단에서 분석을 시작할 전산 Raw 파일(*차)들을 업로드 해주세요.")

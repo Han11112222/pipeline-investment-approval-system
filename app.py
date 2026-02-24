@@ -341,7 +341,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             
         st.markdown("---")
 
-        # ==== 1. 데이터 추출 (항목 매핑 및 차수별 분류) ====
+        # ==== 1. 데이터 추출 (1번 탭의 강력한 스캔 로직 적용) ====
         all_data_unfiltered = []
         
         for file in uploaded_files:
@@ -350,47 +350,45 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 file_cha = int(match.group(1)) if match else 1
                 
                 if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, skiprows=2, encoding='utf-8-sig') 
+                    df = pd.read_csv(file, header=None, encoding='utf-8-sig') 
                 else:
-                    df = pd.read_excel(file, skiprows=2)
+                    df = pd.read_excel(file, header=None)
 
-                df.columns = df.columns.astype(str).str.replace(" ", "")
+                # 1번째 탭과 완벽히 동일한 컬럼 탐색 로직으로 항목, 길이, 투자비 매핑
+                idx_name = get_col_idx(df, ["구간명"], exact=True)
+                idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
+                idx_len = get_col_idx(df, ["길이(m)", "배관길이", "길이"], exact=False)
+                idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
+                idx_home = get_col_idx(df, ["가정용"], exact=False)
+                idx_general = get_col_idx(df, ["일반용"], exact=False)
+                idx_total_vol = get_col_idx(df, ["계(MJ)", "계"], exact=False)
+                idx_npv = get_col_idx(df, ["NPV"], exact=False)
+                idx_irr = get_col_idx(df, ["IRR"], exact=False)
 
-                def find_col(keyword):
-                    for col in df.columns:
-                        if keyword in col:
-                            return col
-                    return None
-
-                extracted = pd.DataFrame()
-                
-                col_name = find_col('구간명')
-                col_inv = find_col('배관투자금액') or find_col('총공사비')
-                col_len = find_col('길이(m)') or find_col('배관길이') or find_col('길이')
-                col_home = find_col('가정용')
-                col_general = find_col('일반용')
-                col_total_vol = find_col('계(MJ)')
-                col_npv = find_col('NPV')
-                col_irr = find_col('IRR')
-                
-                # 항목(공공택지, 공동주택 등)을 찾기 위해 폭넓게 컬럼 탐색
-                col_category = find_col('투자내역') or find_col('용도') or find_col('구분') or find_col('가스용도') or find_col('항목')
-
-                if col_name:
+                if idx_name is not None:
+                    extracted = pd.DataFrame()
                     extracted['차수'] = file_cha
-                    extracted['공사명'] = df[col_name]
-                    extracted['항목'] = df[col_category] if col_category else '미분류'
-                    extracted['규모(m)'] = pd.to_numeric(df[col_len], errors='coerce').fillna(0) if col_len else 0
-                    extracted['투자비(원)'] = pd.to_numeric(df[col_inv], errors='coerce').fillna(0) if col_inv else 0
-                    extracted['가정용 판매량(MJ)'] = pd.to_numeric(df[col_home], errors='coerce').fillna(0) if col_home else 0
-                    extracted['일반용 판매량(MJ)'] = pd.to_numeric(df[col_general], errors='coerce').fillna(0) if col_general else 0
-                    extracted['합계 판매량(MJ)'] = pd.to_numeric(df[col_total_vol], errors='coerce').fillna(0) if col_total_vol else 0
-                    extracted['NPV(원)'] = pd.to_numeric(df[col_npv], errors='coerce').fillna(0) if col_npv else 0
-                    extracted['IRR(%)'] = pd.to_numeric(df[col_irr], errors='coerce').fillna(0) if col_irr else 0
+                    extracted['공사명'] = df.iloc[:, idx_name]
+                    extracted['항목'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
+                    extracted['규모(m)'] = df.iloc[:, idx_len] if idx_len is not None else 0
+                    extracted['투자비(원)'] = df.iloc[:, idx_inv] if idx_inv is not None else 0
+                    extracted['가정용 판매량(MJ)'] = df.iloc[:, idx_home] if idx_home is not None else 0
+                    extracted['일반용 판매량(MJ)'] = df.iloc[:, idx_general] if idx_general is not None else 0
+                    extracted['합계 판매량(MJ)'] = df.iloc[:, idx_total_vol] if idx_total_vol is not None else 0
+                    extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
+                    extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
 
-                    extracted = extracted.dropna(subset=['공사명'])
-                    extracted = extracted[~extracted['공사명'].isin(['구간명', 'nan', ''])]
+                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
+                    invalid_names = ['', '0', 'nan', 'None', '구간명']
+                    extracted = extracted[~extracted['공사명'].isin(invalid_names)]
                     
+                    # 숫자형 데이터 전처리
+                    num_cols_ext = ['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
+                    for c in num_cols_ext:
+                        if extracted[c].dtype == object:
+                            extracted[c] = extracted[c].astype(str).str.replace(',', '', regex=False)
+                        extracted[c] = pd.to_numeric(extracted[c], errors='coerce').fillna(0)
+                        
                     all_data_unfiltered.append(extracted)
 
             except Exception as e:
@@ -399,7 +397,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         # ==== 2. 수요개발배관 파일 자동 매핑을 위한 그룹핑 (기승인, 금회 분리) ====
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
-            # 매칭 정확도를 높이기 위해 띄어쓰기 제거
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
             # 기승인 (선택 차수보다 작은 차수들의 누계)

@@ -109,7 +109,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         clean_df_list = []
         for file in uploaded_files:
             try:
-                file.seek(0) # 파일 포인터 초기화
+                file.seek(0)
                 match = re.search(r'(\d+)차', file.name)
                 cha_num = int(match.group(1)) if match else 1
 
@@ -346,24 +346,23 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         for file in uploaded_files:
             try:
-                # [수정] 파일 포인터를 다시 0으로 돌려서 빈 껍데기를 읽는 버그 해결!
+                # 1. 파일 포인터 리셋 (1탭에서 읽은 파일을 다시 읽기 위해)
                 file.seek(0)
                 
                 match = re.search(r'(\d+)차', file.name)
                 file_cha = int(match.group(1)) if match else 1
                 
                 if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, header=None) 
+                    df = pd.read_csv(file, header=None, encoding='utf-8-sig') 
                 else:
                     df = pd.read_excel(file, header=None)
 
                 extracted = pd.DataFrame()
-                extracted['차수'] = file_cha
                 
-                # [수정] A열(0) = 용도 지정 및 빈칸 채우기(ffill) 완벽 적용
+                # 2. 형님 지시사항 강제 적용: A열(0) = 용도 지정 및 빈칸 채우기(ffill)
                 extracted['항목'] = df.iloc[:, 0].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
                 
-                # [수정] F열(5) = 규모, G열(6) = 금액 지정
+                # 3. 형님 지시사항 강제 적용: F열(5) = 규모, G열(6) = 금액 지정
                 if df.shape[1] > 6:
                     extracted['규모(m)'] = df.iloc[:, 5]
                     extracted['투자비(원)'] = df.iloc[:, 6]
@@ -371,11 +370,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['규모(m)'] = 0
                     extracted['투자비(원)'] = 0
 
-                # 공사명은 get_col_idx로 유연하게 찾되 못 찾으면 B열(1) 사용
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
                 extracted['공사명'] = df.iloc[:, idx_name] if idx_name is not None else df.iloc[:, 1]
                 
-                # 나머지 참고용 데이터 (NPV 등)
                 idx_home = get_col_idx(df, ["가정용"], exact=False)
                 idx_general = get_col_idx(df, ["일반용"], exact=False)
                 idx_total_vol = get_col_idx(df, ["계(MJ)", "계"], exact=False)
@@ -388,7 +385,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
                 extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
 
-                # 쓰레기 값 제거 (소계, 합계 행 등 제거)
+                # 4. 차수 부여를 데이터 프레임 뼈대가 완성된 이 시점으로 이동! (가장 큰 버그 해결)
+                extracted['차수'] = file_cha
+
+                # 쓰레기 값 제거
                 extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                 invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계']
                 extracted = extracted[~extracted['공사명'].isin(invalid_names)]

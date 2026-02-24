@@ -63,14 +63,22 @@ def get_col_idx(df, keywords, exact=False):
     return None
 
 # --------------------------------------------------------------------------
-# [UI] 좌측 사이드바 탭 메뉴 구성
+# [UI] 공통 사이드바 (파일 업로드 및 메뉴)
 # --------------------------------------------------------------------------
-st.sidebar.title("메뉴 네비게이션")
-menu_choice = st.sidebar.radio(
-    "이동할 페이지를 선택하세요:",
-    ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
-)
-st.sidebar.divider()
+with st.sidebar:
+    st.header("📂 데이터 업로드 (공통)")
+    st.markdown("여기서 업로드한 파일은 양쪽 탭 모두에 적용됩니다.")
+    # 양쪽 탭에서 공유할 파일 업로더
+    uploaded_files = st.file_uploader("기초자료 파일 업로드 (*차 다중 선택)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
+    
+    st.divider()
+
+    st.title("메뉴 네비게이션")
+    menu_choice = st.radio(
+        "이동할 페이지를 선택하세요:",
+        ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
+    )
+    st.divider()
 
 # ==========================================================================
 # 탭 1: 기존 배관 투자 경제성 결재 대시보드
@@ -98,59 +106,61 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
     st.title("🏗️ 배관 투자 경제성 결재 대시보드")
     st.markdown("전산 시스템 Raw 데이터를 업로드하여 경제성을 시뮬레이션합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
 
-    # [수정됨] 다중 파일 업로드 지원
-    uploaded_files = st.file_uploader("📂 전산 Raw 데이터 파일 업로드 (Excel/CSV 다중 선택 가능)", type=['xlsx', 'xls', 'csv'], accept_multiple_files=True)
-
     if uploaded_files:
-        df_list = []
+        clean_df_list = []
         for file in uploaded_files:
             try:
+                # 파일명에서 몇 차인지 추출 (예: 기초자료_1차 -> 1)
+                match = re.search(r'(\d+)차', file.name)
+                cha_num = int(match.group(1)) if match else 1
+
                 if file.name.endswith('.csv'):
-                    temp_df = pd.read_csv(file, header=None) 
+                    df = pd.read_csv(file, header=None) 
                 else:
-                    temp_df = pd.read_excel(file, header=None)
-                df_list.append(temp_df)
+                    df = pd.read_excel(file, header=None)
+
+                idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
+                idx_name = get_col_idx(df, ["구간명"], exact=True)
+                idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
+                idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
+                idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
+                idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
+                idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
+                idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
+                idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
+                idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
+                idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
+                idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
+
+                if idx_name is None:
+                    continue # 구간명이 없는 파일은 패스
+
+                mapped_data = {}
+                mapped_data['차수'] = cha_num # 데이터에 차수 태그 부착
+                mapped_data['용도'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
+                mapped_data['구간명'] = df.iloc[:, idx_name]
+                mapped_data['길이'] = df.iloc[:, idx_len] if idx_len is not None else 0
+                mapped_data['투자비'] = df.iloc[:, idx_inv] if idx_inv is not None else 0
+                mapped_data['분담금'] = df.iloc[:, idx_contrib] if idx_contrib is not None else 0
+                mapped_data['기타이익'] = df.iloc[:, idx_other] if idx_other is not None else 0
+                mapped_data['총전수'] = df.iloc[:, idx_jeon] if idx_jeon is not None else 0
+                mapped_data['공동주택전수'] = df.iloc[:, idx_jeon_apt] if idx_jeon_apt is not None else 0
+                mapped_data['단독주택전수'] = df.iloc[:, idx_jeon_single] if idx_jeon_single is not None else 0
+                mapped_data['판매량'] = df.iloc[:, idx_vol] if idx_vol is not None else 0
+                mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
+                mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
+
+                temp_clean_df = pd.DataFrame(mapped_data)
+                clean_df_list.append(temp_clean_df)
+
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
         
-        if not df_list:
-            st.stop()
-            
-        # [수정됨] 여러 파일을 하나로 병합
-        df = pd.concat(df_list, ignore_index=True)
-
-        idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
-        idx_name = get_col_idx(df, ["구간명"], exact=True)
-        idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
-        idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
-        idx_contrib = get_col_idx(df, ["시설분담금"], exact=False)
-        idx_other = get_col_idx(df, ["기타이익", "보조금"], exact=False)
-        idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
-        idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
-        idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
-        idx_vol = get_col_idx(df, ["계(MJ)"], exact=False) 
-        idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
-        idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
-
-        if idx_name is None:
-            st.error("❌ 데이터에서 '구간명'의 위치를 찾을 수 없습니다.")
+        if not clean_df_list:
+            st.error("분석 가능한 유효 데이터가 없습니다.")
             st.stop()
 
-        mapped_data = {}
-        mapped_data['용도'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
-        mapped_data['구간명'] = df.iloc[:, idx_name]
-        mapped_data['길이'] = df.iloc[:, idx_len] if idx_len is not None else 0
-        mapped_data['투자비'] = df.iloc[:, idx_inv] if idx_inv is not None else 0
-        mapped_data['분담금'] = df.iloc[:, idx_contrib] if idx_contrib is not None else 0
-        mapped_data['기타이익'] = df.iloc[:, idx_other] if idx_other is not None else 0
-        mapped_data['총전수'] = df.iloc[:, idx_jeon] if idx_jeon is not None else 0
-        mapped_data['공동주택전수'] = df.iloc[:, idx_jeon_apt] if idx_jeon_apt is not None else 0
-        mapped_data['단독주택전수'] = df.iloc[:, idx_jeon_single] if idx_jeon_single is not None else 0
-        mapped_data['판매량'] = df.iloc[:, idx_vol] if idx_vol is not None else 0
-        mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
-        mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
-
-        clean_df = pd.DataFrame(mapped_data)
+        clean_df = pd.concat(clean_df_list, ignore_index=True)
 
         clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
         invalid_names = ['', '0', 'nan', 'None', '구간명']
@@ -172,7 +182,27 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         
         num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-        st.success("✅ 여러 개의 전산 파일 병합 및 업로드 완료! 사이드바의 변수를 세팅해 보세요.")
+        # ==== 신규 기능: 차수 필터링 UI ====
+        st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        available_chas = sorted(clean_df['차수'].unique())
+        
+        with col1:
+            selected_cha = st.selectbox("📌 기준 차수 선택", available_chas, index=len(available_chas)-1, format_func=lambda x: f"{x}차")
+        with col2:
+            view_mode = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"])
+
+        # 데이터 필터링 적용
+        if view_mode == "1. 당해차수 데이터":
+            filtered_clean_df = clean_df[clean_df['차수'] == selected_cha]
+            st.info(f"선택됨: **{selected_cha}차** 당해차수 데이터만 분석합니다.")
+        else:
+            filtered_clean_df = clean_df[clean_df['차수'] <= selected_cha]
+            st.info(f"선택됨: **1차 부터 {selected_cha}차 까지의 누적** 데이터를 분석합니다.")
+            
+        st.markdown("---")
 
         def get_analysis_result(row):
             npv, irr, irr_msg, _ = calculate_simulation(
@@ -184,8 +214,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
         
         usage_results = []
-        for u in clean_df['용도'].unique():
-            u_df = clean_df[clean_df['용도'] == u]
+        for u in filtered_clean_df['용도'].unique():
+            u_df = filtered_clean_df[filtered_clean_df['용도'] == u]
             u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
             is_selected = False if 'ROE' in str(u).upper() else True
             
@@ -219,8 +249,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
 
         if selected_usages:
-            filtered_df = clean_df[clean_df['용도'].isin(selected_usages)]
-            t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(filtered_df[num_cols].sum())
+            final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
+            t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum())
 
             st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
             m1, m2 = st.columns(2)
@@ -236,7 +266,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             st.divider()
 
             st.subheader("3. 📑 구간별 경제성 상세 명세서")
-            df_detail = filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
+            df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
             detail_results = []
             for _, row in df_detail.iterrows():
                 d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
@@ -251,25 +281,22 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
             }), use_container_width=True, hide_index=True)
     else:
-        st.info("👆 분석을 시작하려면 전산 Raw 파일을 올려주세요.")
+        st.info("👆 좌측 메뉴바 상단에서 분석을 시작할 전산 Raw 파일(*차)들을 업로드 해주세요.")
 
 
 # ==========================================================================
 # 탭 2: 신규 배관 투자 승인 내역 자동화
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
-    st.title("📋 배관 투자 승인 내역 자동 생성기")
-    st.markdown("기초자료 엑셀/CSV 파일을 업로드하면 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
+    st.title("📋 2026년도 배관 투자 승인 내역")
+    st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
     
-    # 2026년 사업계획 투자한도액 세팅 (필요시 화면에서 바로 수정 가능하도록 구성)
+    # 2026년 사업계획 투자한도액 세팅
     budget_2026 = st.number_input("💰 2026년 사업계획 투자한도액 (원)", value=10000000000, step=10000000, format="%d")
-
-    uploaded_files = st.file_uploader("기초자료 파일 업로드 (1차, 2차 등 여러 개 선택)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
 
     if uploaded_files:
         all_data = []
         
-        # 파일별 차수와 투자비 추적을 위한 변수
         max_cha = 0
         current_inv_amount = 0
         total_inv_amount = 0
@@ -313,14 +340,13 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     
                     all_data.append(extracted)
                     
-                    # 파일명에서 차수 추출 (예: '기초자료_2차' -> 2)
+                    # 차수 및 금액 산출
                     match = re.search(r'(\d+)차', file.name)
                     file_cha = int(match.group(1)) if match else 1
                     
                     file_total_inv = extracted['투자비(원)'].sum()
                     total_inv_amount += file_total_inv
                     
-                    # 가장 높은 차수의 금액을 '금회 신청 내역'으로 산출
                     if file_cha > max_cha:
                         max_cha = file_cha
                         current_inv_amount = file_total_inv
@@ -331,7 +357,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
         
         if all_data:
-            # 1. 상단 투자 한도 요약 테이블 표출
             st.subheader("📊 2026년 배관 투자 승인 요약")
             summary_df = pd.DataFrame({
                 "구분": ["2026년 사업계획 투자한도액", f"금회 신청 내역 ({max_cha}차)", "2026년 본부투자 누계", "잔여 한도액"],
@@ -343,12 +368,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 ]
             })
             
-            # 가로 형태로 깔끔하게 표출
             st.dataframe(summary_df.style.format({"금액(원)": "{:,.0f}"}), hide_index=True, use_container_width=True)
             
             st.divider()
             
-            # 2. 하단 전체 상세 내역 표출
             st.subheader(f"📝 {max_cha}차 누계 상세 승인 내역")
             final_df = pd.concat(all_data, ignore_index=True)
             final_df.index = final_df.index + 1 
@@ -366,6 +389,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             st.download_button(
                 label="📥 상세 승인내역 CSV 다운로드",
                 data=csv_data,
-                file_name=f"배관투자_승인내역_{max_cha}차_최종.csv",
+                file_name=f"2026년도_배관투자_승인내역_{max_cha}차_누계.csv",
                 mime="text/csv"
             )
+    else:
+        st.info("👆 좌측 메뉴바 상단에서 분석을 시작할 전산 Raw 파일(*차)들을 업로드 해주세요.")

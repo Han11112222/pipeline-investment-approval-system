@@ -68,7 +68,6 @@ def get_col_idx(df, keywords, exact=False):
 with st.sidebar:
     st.header("📂 데이터 업로드 (공통)")
     st.markdown("여기서 업로드한 파일은 양쪽 탭 모두에 적용됩니다.")
-    # 양쪽 탭에서 공유할 파일 업로더
     uploaded_files = st.file_uploader("기초자료 파일 업로드 (*차 다중 선택)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
     
     st.divider()
@@ -110,7 +109,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         clean_df_list = []
         for file in uploaded_files:
             try:
-                # 파일명에서 몇 차인지 추출 (예: 기초자료_1차 -> 1)
                 match = re.search(r'(\d+)차', file.name)
                 cha_num = int(match.group(1)) if match else 1
 
@@ -133,10 +131,10 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
 
                 if idx_name is None:
-                    continue # 구간명이 없는 파일은 패스
+                    continue
 
                 mapped_data = {}
-                mapped_data['차수'] = cha_num # 데이터에 차수 태그 부착
+                mapped_data['차수'] = cha_num
                 mapped_data['용도'] = df.iloc[:, idx_usage] if idx_usage is not None else '미분류'
                 mapped_data['구간명'] = df.iloc[:, idx_name]
                 mapped_data['길이'] = df.iloc[:, idx_len] if idx_len is not None else 0
@@ -182,7 +180,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         
         num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-        # ==== 신규 기능: 차수 필터링 UI ====
         st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
         st.markdown("---")
         
@@ -194,7 +191,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         with col2:
             view_mode = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"])
 
-        # 데이터 필터링 적용
         if view_mode == "1. 당해차수 데이터":
             filtered_clean_df = clean_df[clean_df['차수'] == selected_cha]
             st.info(f"선택됨: **{selected_cha}차** 당해차수 데이터만 분석합니다.")
@@ -292,27 +288,27 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     # --- 탭 2 전용 좌측 사이드바 하단 UI 구성 ---
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액")
-        st.markdown("표에 항목별 **[규모]**와 **[금액]**을 입력하세요.")
+        st.markdown("아래 표에 항목별 **[규모]**와 **[금액]** 디폴트값을 입력하세요.")
         
         st.subheader("🔹 수요개발배관")
+        # [수정] 아래 [0, 0...] 부분에 2번째 사진의 디폴트값을 넣어주세요!
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
-            "규모": [0, 0, 0, 0, 0, 0, 0, 0],
-            "금액": [0, 0, 0, 0, 0, 0, 0, 0]
+            "규모": [0, 0, 0, 0, 0, 0, 0, 0], 
+            "금액": [0, 0, 0, 0, 0, 0, 0, 0]  
         })
-        # 데이터 에디터로 수정 가능하게 표출
         edited_sd = st.data_editor(df_sd_base, key="sd_editor", hide_index=True, use_container_width=True)
         
         st.subheader("🔹 기본계획배관")
+        # [수정] 아래 [0, 0...] 부분에 3번째 사진의 디폴트값을 넣어주세요!
         df_bp_base = pd.DataFrame({
             "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "인입배관", "공급시설물 개선"],
-            "규모": [0, 0, 0, 0, 0, 0],
-            "금액": [0, 0, 0, 0, 0, 0]
+            "규모": [0, 0, 0, 0, 0, 0], 
+            "금액": [0, 0, 0, 0, 0, 0]  
         })
-        # 데이터 에디터로 수정 가능하게 표출
         edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
         
-        # 합산 예산 계산
+        # 합산 예산 계산 (총 투자한도액)
         budget_2026 = int(edited_sd['금액'].sum() + edited_bp['금액'].sum())
         st.info(f"✅ 총 사업계획 투자한도액: **{budget_2026:,.0f} 원**")
 
@@ -320,6 +316,28 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     st.title("📋 2026년도 배관 투자 승인 내역")
     st.markdown("기초자료 엑셀/CSV 파일을 바탕으로 2026년 투자 누계액과 승인 내역을 자동 산출합니다.")
 
+    # ==== 신규 기능: 좌측 데이터를 바탕으로 4번째 사진처럼 메인 화면에 표출 ====
+    st.subheader("📌 2026년 사업계획 투자한도액 세부 구성")
+    
+    # 수요개발배관, 기본계획배관 데이터 병합
+    df_sd_display = edited_sd.copy()
+    df_sd_display.insert(0, '구분', '수요개발배관')
+    
+    df_bp_display = edited_bp.copy()
+    df_bp_display.insert(0, '구분', '기본계획배관')
+    
+    df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
+    
+    # 총 합계 행 추가
+    total_scale = df_budget_detail['규모'].sum()
+    total_amount = df_budget_detail['금액'].sum()
+    df_budget_detail.loc[len(df_budget_detail)] = ['합계', '총계', total_scale, total_amount]
+    
+    # 표 렌더링 (천 단위 콤마 포맷팅)
+    st.dataframe(df_budget_detail.style.format({"규모": "{:,.0f}", "금액": "{:,.0f}"}), hide_index=True, use_container_width=True)
+    st.divider()
+
+    # 이하 기존 승인 내역 로직
     if uploaded_files:
         all_data = []
         

@@ -4,6 +4,7 @@ import numpy as np
 import numpy_financial as npf
 import re
 import plotly.express as px
+import os
 
 # --------------------------------------------------------------------------
 # [설정] 페이지 기본
@@ -11,7 +12,7 @@ import plotly.express as px
 st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline Approval)", page_icon="🏗️", layout="wide")
 
 # --------------------------------------------------------------------------
-# [함수] 금융 계산 로직 (전산 시스템과 대조할 순수 오리지널 로직)
+# [함수] 금융 계산 로직
 # --------------------------------------------------------------------------
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
@@ -64,13 +65,45 @@ def get_col_idx(df, keywords, exact=False):
     return None
 
 # --------------------------------------------------------------------------
-# [UI] 공통 사이드바 (파일 업로드 및 메뉴)
+# [UI] 공통 사이드바 (파일 업로드 및 자동 스캔)
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.header("📂 데이터 업로드 (공통)")
-    st.markdown("수요개발(기초자료) 및 기본계획/인입(투자현황정리) 엑셀을 모두 드래그 앤 드롭 하세요.")
-    uploaded_files = st.file_uploader("기초자료 및 현황정리 파일 업로드 (*다중 선택 가능)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
+    st.header("📂 데이터 로드 (자동/수동)")
+    st.markdown("깃허브에 올린 엑셀 파일을 자동으로 찾아냅니다. (급할 땐 아래에 바로 드래그 업로드 가능)")
     
+    uploaded_files = st.file_uploader("수동 파일 업로드 (기본값 덮어쓰기용)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
+    
+    working_files = []
+    
+    # 1. 수동 업로드 시 (Plan B)
+    if uploaded_files:
+        working_files = uploaded_files
+        st.success(f"📌 수동 업로드 모드: {len(working_files)}개 파일 적용됨")
+    
+    # 2. 깃허브 자동 탐색 (Plan A - 레이더 기능)
+    else:
+        scanned_files = []
+        # 현재 서버의 최상위 폴더부터 하위 폴더까지 싹 다 뒤짐
+        for root, dirs, files in os.walk("."):
+            # 시스템 폴더(.git 등)는 패스
+            if '.git' in root or '.streamlit' in root: 
+                continue
+            
+            for f in files:
+                if f.endswith(('.csv', '.xlsx', '.xls')) and not f.startswith('~'):
+                    # '기초자료', '현황', '투자' 라는 단어가 들어간 엑셀만 수집
+                    if '기초자료' in f or '현황' in f or '투자' in f:
+                        scanned_files.append(os.path.join(root, f))
+        
+        working_files = list(set(scanned_files)) # 중복 방지
+        
+        if working_files:
+            st.info(f"💡 자동 로드 모드: 깃허브에서 {len(working_files)}개 엑셀 파일 발견!")
+            for wf in working_files:
+                st.caption(f"✅ {os.path.basename(wf)}") # 찾은 파일 이름들 보여주기
+        else:
+            st.warning("⚠️ 깃허브에서 엑셀 파일을 찾지 못했습니다. 깃허브 동기화를 기다리거나 수동 업로드 하세요.")
+            
     st.divider()
 
     st.title("메뉴 네비게이션")
@@ -106,22 +139,27 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
     st.title("🏗️ 배관 투자 경제성 결재 대시보드")
     st.markdown("전산 시스템 Raw 데이터를 업로드하여 경제성을 시뮬레이션합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
 
-    if uploaded_files:
+    if working_files:
         clean_df_list = []
-        for file in uploaded_files:
+        for file_obj in working_files:
             try:
-                # [안전장치] 투자현황 파일은 1탭에서 무시하도록 건너뜀
-                if '현황정리' in file.name or '투자현황' in file.name:
+                # 파일명 추출 (업로드 객체인지 경로 문자열인지 구분)
+                file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
+                
+                # 투자현황 파일은 1탭에서 제외
+                if '현황' in file_name or '투자' in file_name and '기초자료' not in file_name:
                     continue
                     
-                file.seek(0)
-                match = re.search(r'(\d+)차', file.name)
+                if hasattr(file_obj, 'seek'):
+                    file_obj.seek(0)
+                
+                match = re.search(r'(\d+)차', file_name)
                 cha_num = int(match.group(1)) if match else 1
 
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, header=None) 
+                if file_name.endswith('.csv'):
+                    df = pd.read_csv(file_obj, header=None, encoding='utf-8-sig') 
                 else:
-                    df = pd.read_excel(file, header=None)
+                    df = pd.read_excel(file_obj, header=None)
 
                 idx_usage = get_col_idx(df, ["용도", "가스용도"], exact=True)
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
@@ -158,132 +196,129 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 clean_df_list.append(temp_clean_df)
 
             except Exception as e:
-                st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
+                pass
         
         if not clean_df_list:
-            st.error("분석 가능한 유효 데이터가 없습니다.")
-            st.stop()
-
-        clean_df = pd.concat(clean_df_list, ignore_index=True)
-
-        clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
-        invalid_names = ['', '0', 'nan', 'None', '구간명']
-        clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
-        clean_df['용도'] = clean_df['용도'].astype(str).str.strip().ffill().fillna('미분류')
-
-        num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가']
-        for c in num_cols_base:
-            if clean_df[c].dtype == object:
-                clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
-            clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
-
-        clean_df['총전수'] = np.maximum(clean_df['총전수'], clean_df['공동주택전수'] + clean_df['단독주택전수'])
-        
-        clean_df['기본요금수익'] = 0.0
-        temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
-        is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
-        clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
-        
-        num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
-
-        st.success("✅ 기초자료 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        available_chas = sorted(clean_df['차수'].unique())
-        
-        with col1:
-            selected_cha = st.selectbox("📌 기준 차수 선택", available_chas, index=len(available_chas)-1, format_func=lambda x: f"{x}차")
-        with col2:
-            view_mode = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"])
-
-        if view_mode == "1. 당해차수 데이터":
-            filtered_clean_df = clean_df[clean_df['차수'] == selected_cha]
-            st.info(f"선택됨: **{selected_cha}차** 당해차수 데이터만 분석합니다.")
+            st.warning("분석 가능한 기초자료 파일이 로드되지 않았습니다.")
         else:
-            filtered_clean_df = clean_df[clean_df['차수'] <= selected_cha]
-            st.info(f"선택됨: **1차 부터 {selected_cha}차 까지의 누적** 데이터를 분석합니다.")
+            clean_df = pd.concat(clean_df_list, ignore_index=True)
+
+            clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
+            invalid_names = ['', '0', 'nan', 'None', '구간명']
+            clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
+            clean_df['용도'] = clean_df['용도'].astype(str).str.strip().ffill().fillna('미분류')
+
+            num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가']
+            for c in num_cols_base:
+                if clean_df[c].dtype == object:
+                    clean_df[c] = clean_df[c].astype(str).str.replace(',', '', regex=False)
+                clean_df[c] = pd.to_numeric(clean_df[c], errors='coerce').fillna(0)
+
+            clean_df['총전수'] = np.maximum(clean_df['총전수'], clean_df['공동주택전수'] + clean_df['단독주택전수'])
             
-        st.markdown("---")
-
-        def get_analysis_result(row):
-            npv, irr, irr_msg, _ = calculate_simulation(
-                row['길이'], row['투자비'], row['분담금'], row['기타이익'], row['판매량'], row['판매액'], row['판매원가'], 
-                row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
-            )
-            return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
-
-        st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
-        
-        usage_results = []
-        for u in filtered_clean_df['용도'].unique():
-            u_df = filtered_clean_df[filtered_clean_df['용도'] == u]
-            u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
-            is_selected = False if 'ROE' in str(u).upper() else True
+            clean_df['기본요금수익'] = 0.0
+            temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
+            is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
+            clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
             
-            usage_results.append({
-                "선택": is_selected,
-                "용도": u,
-                "총 투자길이(m)": float(u_len),
-                "총 순투자액(원)": float(u_net_inv),
-                "연간판매량(MJ)": float(u_vol),
-                "NPV(원)": float(u_npv),
-                "IRR(%)": float(u_irr*100) if u_irr is not None else None
-            })
+            num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
+
+            st.success("✅ 기초자료 로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
+            st.markdown("---")
             
-        df_usage_summary = pd.DataFrame(usage_results)
-
-        edited_df = st.data_editor(
-            df_usage_summary,
-            column_config={
-                "선택": st.column_config.CheckboxColumn("선택"),
-                "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
-                "총 순투자액(원)": st.column_config.NumberColumn(format="%.0f"),
-                "연간판매량(MJ)": st.column_config.NumberColumn(format="%.0f"),
-                "NPV(원)": st.column_config.NumberColumn(format="%.0f"),
-                "IRR(%)": st.column_config.NumberColumn(format="%.2f")
-            },
-            disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
-            hide_index=True,
-            use_container_width=True
-        )
-
-        selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
-
-        if selected_usages:
-            final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
-            t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum())
-
-            st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
-            m1, m2 = st.columns(2)
-            m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
-            m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
+            col1, col2 = st.columns(2)
+            available_chas = sorted(clean_df['차수'].unique())
             
-            subtotal_df = pd.DataFrame([{
-                "항목명": "☑️ 선택 용도 총합계",
-                "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
-            }])
-            st.dataframe(subtotal_df.style.format({"{:,.1f}": "총 투자길이(m)", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), hide_index=True)
+            with col1:
+                selected_cha = st.selectbox("📌 기준 차수 선택", available_chas, index=len(available_chas)-1, format_func=lambda x: f"{x}차")
+            with col2:
+                view_mode = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"])
 
-            st.divider()
+            if view_mode == "1. 당해차수 데이터":
+                filtered_clean_df = clean_df[clean_df['차수'] == selected_cha]
+                st.info(f"선택됨: **{selected_cha}차** 당해차수 데이터만 분석합니다.")
+            else:
+                filtered_clean_df = clean_df[clean_df['차수'] <= selected_cha]
+                st.info(f"선택됨: **1차 부터 {selected_cha}차 까지의 누적** 데이터를 분석합니다.")
+                
+            st.markdown("---")
 
-            st.subheader("3. 📑 구간별 경제성 상세 명세서")
-            df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
-            detail_results = []
-            for _, row in df_detail.iterrows():
-                d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
-                detail_results.append({
-                    "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len,
-                    "공급전수(전)": row['총전수'], "기본요금수익(원)": row['기본요금수익'], 
-                    "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
+            def get_analysis_result(row):
+                npv, irr, irr_msg, _ = calculate_simulation(
+                    row['길이'], row['투자비'], row['분담금'], row['기타이익'], row['판매량'], row['판매액'], row['판매원가'], 
+                    row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
+                )
+                return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
+
+            st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
+            
+            usage_results = []
+            for u in filtered_clean_df['용도'].unique():
+                u_df = filtered_clean_df[filtered_clean_df['용도'] == u]
+                u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum())
+                is_selected = False if 'ROE' in str(u).upper() else True
+                
+                usage_results.append({
+                    "선택": is_selected,
+                    "용도": u,
+                    "총 투자길이(m)": float(u_len),
+                    "총 순투자액(원)": float(u_net_inv),
+                    "연간판매량(MJ)": float(u_vol),
+                    "NPV(원)": float(u_npv),
+                    "IRR(%)": float(u_irr*100) if u_irr is not None else None
                 })
                 
-            st.dataframe(pd.DataFrame(detail_results).style.format({
-                "투자길이(m)": "{:,.1f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
-                "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
-            }), use_container_width=True, hide_index=True)
-    else:
-        st.info("👆 좌측 메뉴바 상단에서 분석을 시작할 전산 Raw 파일(*차)들을 업로드 해주세요.")
+            df_usage_summary = pd.DataFrame(usage_results)
+
+            edited_df = st.data_editor(
+                df_usage_summary,
+                column_config={
+                    "선택": st.column_config.CheckboxColumn("선택"),
+                    "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
+                    "총 순투자액(원)": st.column_config.NumberColumn(format="%.0f"),
+                    "연간판매량(MJ)": st.column_config.NumberColumn(format="%.0f"),
+                    "NPV(원)": st.column_config.NumberColumn(format="%.0f"),
+                    "IRR(%)": st.column_config.NumberColumn(format="%.2f")
+                },
+                disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
+                hide_index=True,
+                use_container_width=True
+            )
+
+            selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
+
+            if selected_usages:
+                final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
+                t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum())
+
+                st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
+                m1, m2 = st.columns(2)
+                m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
+                m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
+                
+                subtotal_df = pd.DataFrame([{
+                    "항목명": "☑️ 선택 용도 총합계",
+                    "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
+                }])
+                st.dataframe(subtotal_df.style.format({"{:,.1f}": "총 투자길이(m)", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), hide_index=True)
+
+                st.divider()
+
+                st.subheader("3. 📑 구간별 경제성 상세 명세서")
+                df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
+                detail_results = []
+                for _, row in df_detail.iterrows():
+                    d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row)
+                    detail_results.append({
+                        "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len,
+                        "공급전수(전)": row['총전수'], "기본요금수익(원)": row['기본요금수익'], 
+                        "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
+                    })
+                    
+                st.dataframe(pd.DataFrame(detail_results).style.format({
+                    "투자길이(m)": "{:,.1f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
+                    "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
+                }), use_container_width=True, hide_index=True)
 
 
 # ==========================================================================
@@ -291,12 +326,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
     
-    # ----------------------------------------------------------------------
-    # [1단계] 모든 파일을 먼저 스캔하여 데이터를 차수별로 분류/저장
-    # ----------------------------------------------------------------------
-    extracted_bp_data_by_cha = {} # { 1: {'계획배관': {...}}, 2: {'계획배관': {...}}, ... }
-    all_data_unfiltered = []      # 수요개발배관 상세 데이터
-    chas = []                     # 존재하는 전체 차수 리스트
+    extracted_bp_data_by_cha = {}
+    all_data_unfiltered = []
+    chas = []
     
     def get_multi_col_idx(df_temp, keywords):
         found_cols = []
@@ -308,23 +340,26 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                         found_cols.append(col_idx)
         return list(set(found_cols))
     
-    if uploaded_files:
-        for file in uploaded_files:
+    if working_files:
+        for file_obj in working_files:
             try:
-                file.seek(0)
-                match = re.search(r'(\d+)차', file.name)
+                file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
+                if hasattr(file_obj, 'seek'):
+                    file_obj.seek(0)
+                    
+                match = re.search(r'(\d+)차', file_name)
                 file_cha = int(match.group(1)) if match else 1
                 chas.append(file_cha)
                 
-                # A. 공무팀 현황정리 파일 파싱 (차수별로 딕셔너리에 저장)
-                if '현황정리' in file.name or '투자현황' in file.name:
-                    if file.name.endswith('.csv'):
-                        df_status = pd.read_csv(file, header=None)
+                # A. 공무팀 현황정리 파일
+                if '현황' in file_name or '투자' in file_name and '기초자료' not in file_name:
+                    if file_name.endswith('.csv'):
+                        df_status = pd.read_csv(file_obj, header=None, encoding='utf-8-sig')
                     else:
                         try:
-                            df_status = pd.read_excel(file, sheet_name='투자현황', header=None)
+                            df_status = pd.read_excel(file_obj, sheet_name='투자현황', header=None)
                         except:
-                            df_status = pd.read_excel(file, header=None)
+                            df_status = pd.read_excel(file_obj, header=None)
 
                     if file_cha not in extracted_bp_data_by_cha:
                         extracted_bp_data_by_cha[file_cha] = {}
@@ -351,12 +386,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                                 except:
                                     pass
                 
-                # B. 수요개발배관(기초자료) 파일 파싱
+                # B. 수요개발배관(기초자료) 파일
                 else:
-                    if file.name.endswith('.csv'):
-                        df = pd.read_csv(file, header=None, encoding='utf-8-sig') 
+                    if file_name.endswith('.csv'):
+                        df = pd.read_csv(file_obj, header=None, encoding='utf-8-sig') 
                     else:
-                        df = pd.read_excel(file, header=None)
+                        df = pd.read_excel(file_obj, header=None)
 
                     extracted = pd.DataFrame()
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
@@ -412,23 +447,18 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     all_data_unfiltered.append(extracted)
 
             except Exception as e:
-                st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
+                pass
 
-    # ----------------------------------------------------------------------
-    # [2단계] 메인 화면 상단 (차수 선택 필터 먼저 렌더링)
-    # ----------------------------------------------------------------------
+    # --- 메인 화면 상단 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
-    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관 및 65A미만 인입은 공무팀 실적 파일과 연동**하여 산출합니다.")
+    st.markdown("깃허브 파일 데이터를 바탕으로 **수요개발은 자동 계산**하고, **기본계획/인입은 공무팀 실적 파일과 연동**하여 산출합니다.")
 
-    if uploaded_files:
+    if working_files:
         available_chas_t2 = sorted(list(set(chas))) if chas else [1]
         
-        st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
         st.markdown("---")
-        
         col1, col2 = st.columns(2)
         with col1:
-            # 여기서 선택한 차수가 아래 사이드바의 딕셔너리 키 값으로 즉시 반영됨!
             selected_cha_t2 = st.selectbox("📌 기준 차수 선택 (승인 내역용)", available_chas_t2, index=len(available_chas_t2)-1, format_func=lambda x: f"{x}차")
         with col2:
             view_mode_t2 = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"], key="view_mode_t2")
@@ -438,13 +468,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         selected_cha_t2 = 1
         view_mode_t2 = "1. 당해차수 데이터"
 
-    # ----------------------------------------------------------------------
-    # [3단계] 좌측 사이드바 렌더링 (선택된 차수의 데이터만 꺼내기)
-    # ----------------------------------------------------------------------
+    # --- 좌측 사이드바 ---
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
-        st.subheader("🔹 1. 수요개발배관 (실적은 기초자료 추출)")
+        st.subheader("🔹 1. 수요개발배관 (실적 자동 추출)")
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
             "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
@@ -454,11 +482,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
 
-        # 선택된 차수에 해당하는 현황정리 데이터만 불러옴
         current_bp_data = extracted_bp_data_by_cha.get(selected_cha_t2, {})
 
-        st.subheader("🔹 2. 기본계획배관 (현황정리 엑셀 연동 + 수기수정)")
-        st.markdown(f"**현재 '{selected_cha_t2}차' 데이터가 로드되었습니다.**")
+        st.subheader("🔹 2. 기본계획배관 (현황정리 엑셀 연동)")
+        st.markdown(f"**현재 선택된 '{selected_cha_t2}차' 데이터가 로드되었습니다.**")
         
         bp_items = ["계획배관", "Loop", "이설배관", "지역정압기", "공급시설물 개선"]
         bp_limit_s = [2828, 749, 624, 3, 95]
@@ -485,12 +512,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             "금회_규모": bp_c_s,
             "금회_금액": bp_c_a
         })
-        # 차수 변경 시 에디터를 강제로 새로고침하기 위해 key에 차수 추가
         edited_bp = st.data_editor(df_bp_base, key=f"bp_editor_{selected_cha_t2}", hide_index=True, use_container_width=True)
 
         st.divider()
 
-        st.subheader("🔹 3. 65A미만 인입 (현황정리 엑셀 연동 + 수기수정)")
+        st.subheader("🔹 3. 65A미만 인입 (현황정리 엑셀 연동)")
         
         in_p_s, in_p_a, in_c_s, in_c_a = 0, 0, 0, 0
         if '인입배관' in current_bp_data:
@@ -510,12 +536,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         })
         edited_in = st.data_editor(df_in_base, key=f"in_editor_{selected_cha_t2}", hide_index=True, use_container_width=True)
 
-
-    # ----------------------------------------------------------------------
-    # [4단계] 메인 화면 하단: 표 및 그래프 렌더링
-    # ----------------------------------------------------------------------
-    if uploaded_files:
-        # 수요개발배관 파일 자동 매핑을 위한 그룹핑
+    # --- 메인 화면 하단: 표 및 그래프 렌더링 ---
+    if working_files:
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
@@ -563,14 +585,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
 
         # ==== 프레임 구성 및 총계 산출 ====
-        # 1) 수요개발배관
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
         df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', df_sd_display['한도_규모'].sum(), df_sd_display['한도_금액'].sum()] 
         df_sd_display = fill_sd_metrics(df_sd_display)
         
-        # 2) 기본계획배관
         df_bp_display = edited_bp.copy()
         df_bp_display.insert(0, '구분', '기본계획배관')
         df_bp_display['누계_규모'] = df_bp_display['기승인_규모'] + df_bp_display['금회_규모']
@@ -586,7 +606,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         }
         df_bp_display = pd.concat([df_bp_display, pd.DataFrame([bp_sub_row])], ignore_index=True)
 
-        # 3) 65A미만 인입
         df_in_display = edited_in.copy()
         df_in_display.insert(0, '구분', '65A미만 인입')
         df_in_display['누계_규모'] = df_in_display['기승인_규모'] + df_in_display['금회_규모']
@@ -602,7 +621,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         }
         df_in_display = pd.concat([df_in_display, pd.DataFrame([in_sub_row])], ignore_index=True)
         
-        # 합체 및 총계 산출
         df_budget_detail = pd.concat([df_sd_display, df_bp_display, df_in_display], ignore_index=True)
         
         sd_sub_idx = len(df_sd_display) - 1
@@ -780,5 +798,3 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 st.info("해당 차수에 추출된 세부 공사 내역이 없습니다.")
         else:
             st.info("조건에 맞는 데이터가 없습니다.")
-    else:
-        st.info("👆 좌측 메뉴바 상단에서 분석을 시작할 전산 Raw 파일(*차)들을 업로드 해주세요.")

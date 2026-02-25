@@ -341,12 +341,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             
         st.markdown("---")
 
-        # ==== 1. 데이터 추출 (A=0, F=5, G=6 강제 지정 및 ffill 적용) ====
+        # ==== 1. 데이터 추출 (A=0, F=5, G=6 강제 매핑 및 숫자 정규화) ====
         all_data_unfiltered = []
         
         for file in uploaded_files:
             try:
-                # 1. 파일 포인터 리셋 (1탭에서 읽은 파일을 다시 읽기 위해)
+                # 파일 포인터 리셋 (중요: 빈 껍데기 방지)
                 file.seek(0)
                 
                 match = re.search(r'(\d+)차', file.name)
@@ -359,10 +359,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                 extracted = pd.DataFrame()
                 
-                # 2. 형님 지시사항 강제 적용: A열(0) = 용도 지정 및 빈칸 채우기(ffill)
+                # [안전장치 1] A열(0) = 용도 지정 및 빈칸 채우기(ffill)
                 extracted['항목'] = df.iloc[:, 0].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
                 
-                # 3. 형님 지시사항 강제 적용: F열(5) = 규모, G열(6) = 금액 지정
+                # [안전장치 2] F열(5) = 규모, G열(6) = 금액 강제 지정
                 if df.shape[1] > 6:
                     extracted['규모(m)'] = df.iloc[:, 5]
                     extracted['투자비(원)'] = df.iloc[:, 6]
@@ -372,7 +372,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
                 extracted['공사명'] = df.iloc[:, idx_name] if idx_name is not None else df.iloc[:, 1]
-                
+
+                # [안전장치 3] 차수를 먼저 확실하게 부여
+                extracted['차수'] = file_cha
+
+                # 기타 데이터
                 idx_home = get_col_idx(df, ["가정용"], exact=False)
                 idx_general = get_col_idx(df, ["일반용"], exact=False)
                 idx_total_vol = get_col_idx(df, ["계(MJ)", "계"], exact=False)
@@ -385,33 +389,39 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
                 extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
 
-                # 4. 차수 부여를 데이터 프레임 뼈대가 완성된 이 시점으로 이동! (가장 큰 버그 해결)
-                extracted['차수'] = file_cha
-
-                # 쓰레기 값 제거
+                # 쓰레기 텍스트 데이터 걷어내기
                 extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                 invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계']
                 extracted = extracted[~extracted['공사명'].isin(invalid_names)]
                 
-                # 숫자형으로 변환 (콤마 제거)
+                # [안전장치 4] 오직 '숫자'만 추출하는 강력한 정규식 필터링 (에러나면 0 반환)
+                def clean_numeric(x):
+                    s = str(x).replace(',', '')
+                    s = re.sub(r'[^\d.-]', '', s)
+                    try:
+                        return float(s) if s else 0.0
+                    except:
+                        return 0.0
+
                 num_cols_ext = ['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
                 for c in num_cols_ext:
-                    extracted[c] = pd.to_numeric(extracted[c].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
+                    extracted[c] = extracted[c].apply(clean_numeric)
                     
                 all_data_unfiltered.append(extracted)
 
             except Exception as e:
                 st.error(f"파일을 읽는 중 오류가 발생했습니다 ({file.name}): {e}")
 
-        # ==== 2. 수요개발배관 파일 자동 매핑을 위한 그룹핑 ====
+        # ==== 2. 수요개발배관 파일 자동 매핑을 위한 그룹핑 (수식 완벽 적용) ====
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
             # 항목명 매칭을 위해 띄어쓰기 전부 제거
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
-            # 기승인 (선택 차수보다 작은 차수들의 누계)
+            # [형님 지시사항 적용] 기승인 = 이전 차수까지 누계 (선택차수보다 작은 값들)
             prev_df = all_parsed_df[all_parsed_df['차수'] < selected_cha_t2]
-            # 금회 (선택한 당해 차수)
+            
+            # [형님 지시사항 적용] 금회 = 현재 차수 실적 (선택차수와 같은 값)
             curr_df = all_parsed_df[all_parsed_df['차수'] == selected_cha_t2]
             
             prev_agg = prev_df.groupby('항목_clean')[['규모(m)', '투자비(원)']].sum()
@@ -431,21 +441,21 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 if item_raw == '소계': continue
                 item_clean = str(item_raw).replace('\n', '').replace(' ', '')
                 
-                # 기승인 매핑
+                # 1. 기승인(이전차수 누계) 매핑
                 if not prev_agg.empty:
                     matched_idx = [idx for idx in prev_agg.index if item_clean in str(idx) or str(idx) in item_clean]
                     if matched_idx:
                         df_base.at[i, '기승인_규모'] = prev_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '기승인_금액'] = prev_agg.loc[matched_idx, '투자비(원)'].sum()
                 
-                # 금회 매핑
+                # 2. 금회(현재차수 실적) 매핑
                 if not curr_agg.empty:
                     matched_idx = [idx for idx in curr_agg.index if item_clean in str(idx) or str(idx) in item_clean]
                     if matched_idx:
                         df_base.at[i, '금회_규모'] = curr_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '금회_금액'] = curr_agg.loc[matched_idx, '투자비(원)'].sum()
                 
-                # 누계 및 잔여 계산
+                # 3. [형님 지시사항 적용] 누계 = 기승인 + 금회 (현재차수 전체 누계)
                 df_base.at[i, '누계_규모'] = df_base.at[i, '기승인_규모'] + df_base.at[i, '금회_규모']
                 df_base.at[i, '누계_금액'] = df_base.at[i, '기승인_금액'] + df_base.at[i, '금회_금액']
                 df_base.at[i, '잔여_금액'] = df_base.at[i, '한도_금액'] - df_base.at[i, '누계_금액']
@@ -469,6 +479,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         # ==== 2. 기본계획배관 프레임 구성 ====
         df_bp_display = edited_bp.copy()
         df_bp_display.insert(0, '구분', '기본계획배관')
+        # [형님 지시사항 적용] 기본계획배관도 누계 = 기승인 + 금회
         df_bp_display['누계_규모'] = df_bp_display['기승인_규모'] + df_bp_display['금회_규모']
         df_bp_display['누계_금액'] = df_bp_display['기승인_금액'] + df_bp_display['금회_금액']
         df_bp_display['잔여_금액'] = df_bp_display['한도_금액'] - df_bp_display['누계_금액']

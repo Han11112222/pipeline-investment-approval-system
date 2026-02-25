@@ -526,30 +526,31 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
 
         # =====================================================================
-        # [신규 추가] 상단 전체 요약 및 차트
+        # [신규 추가] 상단 전체 요약 및 차트 (위-아래 배치)
         # =====================================================================
         st.subheader("📈 2026년 배관 투자 전체 요약 및 진척도")
         
         exec_rate = (tot_cum_amt / tot_limit_amt * 100) if tot_limit_amt > 0 else 0
         
-        col_c1, col_c2 = st.columns([2, 1])
-        with col_c1:
-            sum_df = pd.DataFrame({
-                "총 투자한도액": [tot_limit_amt],
-                "기승인 누계": [tot_prev_amt],
-                f"금회 신청 ({selected_cha_t2}차)": [tot_curr_amt],
-                "현재 본부 누계": [tot_cum_amt],
-                "잔여 한도액": [tot_remain_amt]
-            })
-            st.dataframe(sum_df.style.format("{:,.0f}"), hide_index=True, use_container_width=True)
-            st.markdown(f"**🔥 현재 예산 집행률 (누계 기준): <span style='color: #E53935; font-size: 18px;'>{exec_rate:.1f}%</span>**", unsafe_allow_html=True)
-            
-        with col_c2:
-            chart_data = pd.DataFrame({
-                "구분": ["총 투자한도액", "본부투자 누계"],
-                "금액(원)": [tot_limit_amt, tot_cum_amt]
-            }).set_index("구분")
-            st.bar_chart(chart_data, height=180)
+        # 1. 상단: 가로형 숫자 요약 표
+        sum_df = pd.DataFrame({
+            "총 투자한도액": [tot_limit_amt],
+            "기승인 누계": [tot_prev_amt],
+            f"금회 신청 ({selected_cha_t2}차)": [tot_curr_amt],
+            "현재 본부 누계": [tot_cum_amt],
+            "잔여 한도액": [tot_remain_amt]
+        })
+        st.dataframe(sum_df.style.format("{:,.0f}"), hide_index=True, use_container_width=True)
+        st.markdown(f"**🔥 현재 예산 집행률 (누계 기준): <span style='color: #E53935; font-size: 18px;'>{exec_rate:.1f}%</span>**", unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True) # 여백
+        
+        # 2. 하단: 막대 그래프
+        chart_data = pd.DataFrame({
+            "구분": ["총 투자한도액", "본부투자 누계"],
+            "금액(원)": [tot_limit_amt, tot_cum_amt]
+        }).set_index("구분")
+        st.bar_chart(chart_data, height=250)
             
         st.divider()
 
@@ -583,14 +584,24 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
                 
                 # =====================================================================
-                # [신규 추가] 용도별 요약 표
+                # [신규 추가] 용도별 요약 표 (건수 추가)
                 # =====================================================================
                 st.subheader(f"📊 {detail_title_prefix} 용도별 요약")
                 
-                usage_summary = detail_df.groupby('항목')[['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']].sum().reset_index()
+                # 건수 계산
+                usage_counts = detail_df.groupby('항목').size().reset_index(name='건수')
+                # 합계 계산
+                usage_sums = detail_df.groupby('항목')[['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']].sum().reset_index()
+                
+                # 병합 및 컬럼 순서 정리
+                usage_summary = pd.merge(usage_counts, usage_sums, on='항목')
+                cols_order = ['항목', '건수', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']
+                usage_summary = usage_summary[cols_order]
+                
                 # 총계 행 추가
                 usage_summary.loc[len(usage_summary)] = [
                     '총계', 
+                    usage_summary['건수'].sum(),
                     usage_summary['규모(m)'].sum(), 
                     usage_summary['투자비(원)'].sum(), 
                     usage_summary['가정용 판매량(MJ)'].sum(), 
@@ -598,7 +609,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     usage_summary['합계 판매량(MJ)'].sum()
                 ]
                 
+                # 표 렌더링
                 st.dataframe(usage_summary.style.format({
+                    "건수": "{:,.0f} 건",
                     "규모(m)": "{:,.0f}",
                     "투자비(원)": "{:,.0f}",
                     "가정용 판매량(MJ)": "{:,.0f}",

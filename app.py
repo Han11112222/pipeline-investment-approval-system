@@ -75,32 +75,26 @@ with st.sidebar:
     
     working_files = []
     
-    # 1. 수동 업로드 시 (Plan B)
     if uploaded_files:
         working_files = uploaded_files
         st.success(f"📌 수동 업로드 모드: {len(working_files)}개 파일 적용됨")
-    
-    # 2. 깃허브 자동 탐색 (Plan A - 레이더 기능)
     else:
         scanned_files = []
-        # 현재 서버의 최상위 폴더부터 하위 폴더까지 싹 다 뒤짐
         for root, dirs, files in os.walk("."):
-            # 시스템 폴더(.git 등)는 패스
             if '.git' in root or '.streamlit' in root: 
                 continue
             
             for f in files:
                 if f.endswith(('.csv', '.xlsx', '.xls')) and not f.startswith('~'):
-                    # '기초자료', '현황', '투자' 라는 단어가 들어간 엑셀만 수집
                     if '기초자료' in f or '현황' in f or '투자' in f:
                         scanned_files.append(os.path.join(root, f))
         
-        working_files = list(set(scanned_files)) # 중복 방지
+        working_files = list(set(scanned_files))
         
         if working_files:
             st.info(f"💡 자동 로드 모드: 깃허브에서 {len(working_files)}개 엑셀 파일 발견!")
             for wf in working_files:
-                st.caption(f"✅ {os.path.basename(wf)}") # 찾은 파일 이름들 보여주기
+                st.caption(f"✅ {os.path.basename(wf)}") 
         else:
             st.warning("⚠️ 깃허브에서 엑셀 파일을 찾지 못했습니다. 깃허브 동기화를 기다리거나 수동 업로드 하세요.")
             
@@ -143,10 +137,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         clean_df_list = []
         for file_obj in working_files:
             try:
-                # 파일명 추출 (업로드 객체인지 경로 문자열인지 구분)
                 file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
                 
-                # 투자현황 파일은 1탭에서 제외
                 if '현황' in file_name or '투자' in file_name and '기초자료' not in file_name:
                     continue
                     
@@ -199,7 +191,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 pass
         
         if not clean_df_list:
-            st.warning("분석 가능한 기초자료 파일이 로드되지 않았습니다.")
+            st.warning("분석 가능한 유효 데이터(기초자료)가 없습니다.")
         else:
             clean_df = pd.concat(clean_df_list, ignore_index=True)
 
@@ -319,6 +311,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "투자길이(m)": "{:,.1f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
                     "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
                 }), use_container_width=True, hide_index=True)
+    else:
+        st.info("👆 좌측 사이드바에 파일이 로드되지 않았습니다. 깃허브에 파일을 올리거나 직접 업로드 해주세요.")
 
 
 # ==========================================================================
@@ -482,10 +476,24 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
 
-        current_bp_data = extracted_bp_data_by_cha.get(selected_cha_t2, {})
+        # =====================================================================
+        # [신규 추가] 스마트 자동 이월(Carry-over) 로직
+        # =====================================================================
+        available_bp_chas = [c for c in extracted_bp_data_by_cha.keys() if c <= selected_cha_t2]
+        if available_bp_chas:
+            latest_bp_cha = max(available_bp_chas)
+            latest_bp_data = extracted_bp_data_by_cha[latest_bp_cha]
+        else:
+            latest_bp_cha = 0
+            latest_bp_data = {}
 
         st.subheader("🔹 2. 기본계획배관 (현황정리 엑셀 연동)")
-        st.markdown(f"**현재 선택된 '{selected_cha_t2}차' 데이터가 로드되었습니다.**")
+        if latest_bp_cha == selected_cha_t2:
+            st.markdown(f"**✅ 현재 선택된 '{selected_cha_t2}차' 현황정리가 적용되었습니다.**")
+        elif latest_bp_cha > 0:
+            st.markdown(f"**⚠️ '{selected_cha_t2}차' 파일이 없어, 가장 최근인 '{latest_bp_cha}차'의 실적 누계가 '기승인'으로 자동 이월되었습니다!**")
+        else:
+            st.markdown(f"**⚠️ 해당하는 현황정리 데이터가 없습니다.**")
         
         bp_items = ["계획배관", "Loop", "이설배관", "지역정압기", "공급시설물 개선"]
         bp_limit_s = [2828, 749, 624, 3, 95]
@@ -495,11 +503,19 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         for item in bp_items:
             clean_item = item.replace('\n', '').replace(' ', '')
-            if clean_item in current_bp_data:
-                bp_p_s.append(current_bp_data[clean_item]['기승인_규모'])
-                bp_p_a.append(current_bp_data[clean_item]['기승인_금액'])
-                bp_c_s.append(current_bp_data[clean_item]['금회_규모'])
-                bp_c_a.append(current_bp_data[clean_item]['금회_금액'])
+            if clean_item in latest_bp_data:
+                if latest_bp_cha == selected_cha_t2:
+                    # 정확히 그 차수 파일이 있으면 그대로 매핑
+                    bp_p_s.append(latest_bp_data[clean_item]['기승인_규모'])
+                    bp_p_a.append(latest_bp_data[clean_item]['기승인_금액'])
+                    bp_c_s.append(latest_bp_data[clean_item]['금회_규모'])
+                    bp_c_a.append(latest_bp_data[clean_item]['금회_금액'])
+                else:
+                    # 그 차수 파일이 없으면 과거 누계(기승인+금회)를 모두 끌어와서 현재의 '기승인'으로 이월
+                    bp_p_s.append(latest_bp_data[clean_item]['기승인_규모'] + latest_bp_data[clean_item]['금회_규모'])
+                    bp_p_a.append(latest_bp_data[clean_item]['기승인_금액'] + latest_bp_data[clean_item]['금회_금액'])
+                    bp_c_s.append(0)
+                    bp_c_a.append(0)
             else:
                 bp_p_s.append(0); bp_p_a.append(0); bp_c_s.append(0); bp_c_a.append(0)
 
@@ -519,11 +535,18 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         st.subheader("🔹 3. 65A미만 인입 (현황정리 엑셀 연동)")
         
         in_p_s, in_p_a, in_c_s, in_c_a = 0, 0, 0, 0
-        if '인입배관' in current_bp_data:
-            in_p_s = current_bp_data['인입배관']['기승인_규모']
-            in_p_a = current_bp_data['인입배관']['기승인_금액']
-            in_c_s = current_bp_data['인입배관']['금회_규모']
-            in_c_a = current_bp_data['인입배관']['금회_금액']
+        clean_item = '인입배관'
+        if clean_item in latest_bp_data:
+            if latest_bp_cha == selected_cha_t2:
+                in_p_s = latest_bp_data[clean_item]['기승인_규모']
+                in_p_a = latest_bp_data[clean_item]['기승인_금액']
+                in_c_s = latest_bp_data[clean_item]['금회_규모']
+                in_c_a = latest_bp_data[clean_item]['금회_금액']
+            else:
+                in_p_s = latest_bp_data[clean_item]['기승인_규모'] + latest_bp_data[clean_item]['금회_규모']
+                in_p_a = latest_bp_data[clean_item]['기승인_금액'] + latest_bp_data[clean_item]['금회_금액']
+                in_c_s = 0
+                in_c_a = 0
 
         df_in_base = pd.DataFrame({
             "항목": ["65A미만 인입"],

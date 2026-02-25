@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import numpy_financial as npf
 import re
-import plotly.express as px  # 그래프를 예쁘게 그리기 위한 라이브러리 추가
+import plotly.express as px
 
 # --------------------------------------------------------------------------
 # [설정] 페이지 기본
@@ -68,8 +68,8 @@ def get_col_idx(df, keywords, exact=False):
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("📂 데이터 업로드 (공통)")
-    st.markdown("여기서 업로드한 파일은 양쪽 탭 모두에 적용됩니다.")
-    uploaded_files = st.file_uploader("기초자료 파일 업로드 (*차 다중 선택)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
+    st.markdown("수요개발(기초자료) 및 기본계획/인입(투자현황정리) 엑셀을 모두 드래그 앤 드롭 하세요.")
+    uploaded_files = st.file_uploader("기초자료 및 현황정리 파일 업로드 (*다중 선택 가능)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls'])
     
     st.divider()
 
@@ -110,6 +110,10 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         clean_df_list = []
         for file in uploaded_files:
             try:
+                # [안전장치] 투자현황 파일은 1탭에서 무시하도록 건너뜀
+                if '현황정리' in file.name or '투자현황' in file.name:
+                    continue
+                    
                 file.seek(0)
                 match = re.search(r'(\d+)차', file.name)
                 cha_num = int(match.group(1)) if match else 1
@@ -182,7 +186,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         
         num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
 
-        st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
+        st.success("✅ 기초자료 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
         st.markdown("---")
         
         col1, col2 = st.columns(2)
@@ -287,11 +291,55 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
     
+    # [핵심 추가] 공무팀 현황정리 파일 파싱 로직
+    extracted_bp_data = {}
+    if uploaded_files:
+        for file in uploaded_files:
+            if '현황정리' in file.name or '투자현황' in file.name:
+                try:
+                    file.seek(0)
+                    if file.name.endswith('.csv'):
+                        df_status = pd.read_csv(file, header=None)
+                    else:
+                        # 엑셀 파일인 경우 '투자현황' 시트가 존재하면 그걸 읽음
+                        try:
+                            df_status = pd.read_excel(file, sheet_name='투자현황', header=None)
+                        except:
+                            df_status = pd.read_excel(file, header=None)
+
+                    # 엑셀 파일 내에서 '기본계획'과 '인입배관' 등의 값을 스캔해서 딕셔너리에 저장
+                    for row_idx in range(df_status.shape[0]):
+                        col1_val = str(df_status.iloc[row_idx, 1]).strip()
+                        
+                        target_items = ['계획배관', 'Loop', '이설배관', '지역정압기', '지역\n정압기', '공급시설물 개선', '공급시설물\n개선', '인입배관']
+                        
+                        if any(item in col1_val for item in target_items):
+                            # 보통 12, 13열에 '기승인(2026년 본부투자 승인내역)' 규모/금액, 15, 16열에 '금회(3차)' 규모/금액이 있음
+                            # (엑셀 양식에 맞춰 인덱스 강제 지정: 12=기승인규모, 13=기승인금액, 15=금회규모, 16=금회금액)
+                            try:
+                                p_scale = pd.to_numeric(str(df_status.iloc[row_idx, 11]).replace(',', ''), errors='coerce')
+                                p_amt = pd.to_numeric(str(df_status.iloc[row_idx, 12]).replace(',', ''), errors='coerce')
+                                c_scale = pd.to_numeric(str(df_status.iloc[row_idx, 14]).replace(',', ''), errors='coerce')
+                                c_amt = pd.to_numeric(str(df_status.iloc[row_idx, 15]).replace(',', ''), errors='coerce')
+                                
+                                # 공백 제거나 줄바꿈 정규화
+                                clean_key = col1_val.replace('\n', '')
+                                extracted_bp_data[clean_key] = {
+                                    '기승인_규모': p_scale if not pd.isna(p_scale) else 0,
+                                    '기승인_금액': p_amt if not pd.isna(p_amt) else 0,
+                                    '금회_규모': c_scale if not pd.isna(c_scale) else 0,
+                                    '금회_금액': c_amt if not pd.isna(c_amt) else 0
+                                }
+                            except:
+                                pass
+                except Exception as e:
+                    pass
+
     # --- 탭 2 전용 좌측 사이드바 하단 UI 구성 ---
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
-        st.subheader("🔹 1. 수요개발배관 (실적은 파일 자동 추출)")
+        st.subheader("🔹 1. 수요개발배관 (실적은 기초자료 추출)")
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
             "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
@@ -301,35 +349,62 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
 
-        st.subheader("🔹 2. 기본계획배관 (수기 입력 전용)")
+        st.subheader("🔹 2. 기본계획배관 (현황정리 엑셀 연동 + 수기수정)")
+        st.markdown("현황정리 파일을 업로드하면 값이 자동 채워집니다. 아래 표에서 직접 수정도 가능합니다.")
+        
+        # 기본계획배관 베이스 데이터 프레임 생성
+        bp_items = ["계획배관", "Loop", "이설배관", "지역정압기", "공급시설물 개선"]
+        bp_limit_s = [2828, 749, 624, 3, 95]
+        bp_limit_a = [2031952014, 626987840, 766452499, 338045023, 2749999724]
+        
+        bp_p_s, bp_p_a, bp_c_s, bp_c_a = [], [], [], []
+        
+        for item in bp_items:
+            clean_item = item.replace('\n', '')
+            if clean_item in extracted_bp_data:
+                bp_p_s.append(extracted_bp_data[clean_item]['기승인_규모'])
+                bp_p_a.append(extracted_bp_data[clean_item]['기승인_금액'])
+                bp_c_s.append(extracted_bp_data[clean_item]['금회_규모'])
+                bp_c_a.append(extracted_bp_data[clean_item]['금회_금액'])
+            else:
+                bp_p_s.append(0); bp_p_a.append(0); bp_c_s.append(0); bp_c_a.append(0)
+
         df_bp_base = pd.DataFrame({
-            "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "공급시설물 개선"],
-            "한도_규모": [2828, 749, 624, 3, 95], 
-            "한도_금액": [2031952014, 626987840, 766452499, 338045023, 2749999724],
-            "기승인_규모": [0, 0, 0, 0, 0],
-            "기승인_금액": [0, 0, 0, 0, 0],
-            "금회_규모": [0, 0, 0, 0, 0],
-            "금회_금액": [0, 0, 0, 0, 0]
+            "항목": bp_items,
+            "한도_규모": bp_limit_s, 
+            "한도_금액": bp_limit_a,
+            "기승인_규모": bp_p_s,
+            "기승인_금액": bp_p_a,
+            "금회_규모": bp_c_s,
+            "금회_금액": bp_c_a
         })
         edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
 
         st.divider()
 
-        st.subheader("🔹 3. 65A미만 인입 (수기 입력 전용)")
+        st.subheader("🔹 3. 65A미만 인입 (현황정리 엑셀 연동 + 수기수정)")
+        
+        in_p_s, in_p_a, in_c_s, in_c_a = 0, 0, 0, 0
+        if '인입배관' in extracted_bp_data:
+            in_p_s = extracted_bp_data['인입배관']['기승인_규모']
+            in_p_a = extracted_bp_data['인입배관']['기승인_금액']
+            in_c_s = extracted_bp_data['인입배관']['금회_규모']
+            in_c_a = extracted_bp_data['인입배관']['금회_금액']
+
         df_in_base = pd.DataFrame({
             "항목": ["65A미만 인입"],
             "한도_규모": [857], 
             "한도_금액": [3230129038],
-            "기승인_규모": [0],
-            "기승인_금액": [0],
-            "금회_규모": [0],
-            "금회_금액": [0]
+            "기승인_규모": [in_p_s],
+            "기승인_금액": [in_p_a],
+            "금회_규모": [in_c_s],
+            "금회_금액": [in_c_a]
         })
         edited_in = st.data_editor(df_in_base, key="in_editor", hide_index=True, use_container_width=True)
 
     # --- 메인 화면 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
-    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관 및 65A미만 인입은 수기 입력값**을 더해 산출합니다.")
+    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관 및 65A미만 인입은 공무팀 실적 파일과 연동**하여 산출합니다.")
 
     if uploaded_files:
         st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
@@ -338,8 +413,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         chas = []
         for f in uploaded_files:
             m = re.search(r'(\d+)차', f.name)
-            chas.append(int(m.group(1)) if m else 1)
-        available_chas_t2 = sorted(list(set(chas)))
+            if m: chas.append(int(m.group(1)))
+        
+        if not chas:
+            available_chas_t2 = [1]
+        else:
+            available_chas_t2 = sorted(list(set(chas)))
         
         col1, col2 = st.columns(2)
         with col1:
@@ -363,6 +442,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             return list(set(found_cols))
         
         for file in uploaded_files:
+            # 1탭에서 사용하는 기초자료 파일만 분석
+            if '현황정리' in file.name or '투자현황' in file.name:
+                continue
+
             try:
                 file.seek(0)
                 match = re.search(r'(\d+)차', file.name)
@@ -476,7 +559,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             return df_base
 
 
-        # ==== 3. 프레임 구성 및 총계 산출 (3가지 카테고리 병합) ====
+        # ==== 3. 프레임 구성 및 총계 산출 ====
         # 1) 수요개발배관
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
@@ -558,7 +641,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         })
         sum_df['집행률(%)'] = np.where(sum_df['총 투자한도액'] > 0, (sum_df['현재 본부 누계'] / sum_df['총 투자한도액']) * 100, 0)
         
-        # 1. 가로형 숫자 요약 표 렌더링
         st.dataframe(sum_df.style.format({
             "총 투자한도액": "{:,.0f}", "기승인 누계": "{:,.0f}", f"금회 신청 ({selected_cha_t2}차)": "{:,.0f}",
             "현재 본부 누계": "{:,.0f}", "잔여 한도액": "{:,.0f}", "집행률(%)": "{:,.1f}%"
@@ -567,13 +649,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 2. 하단 그래프 영역 (좌: 항목별 막대, 우: 전체 도넛)
         col_c1, col_c2 = st.columns([2, 1.5])
         
         with col_c1:
             st.markdown("#### 📊 구분별 투자 예산 및 실적 현황")
             chart_df = sum_df.iloc[:3].copy()
-            # Plotly 막대그래프용 데이터 재구성
             bar_data = pd.DataFrame({
                 "구분": chart_df["구분"].tolist() * 2,
                 "금액(원)": chart_df["총 투자한도액"].tolist() + chart_df["현재 본부 누계"].tolist(),
@@ -648,7 +728,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 # =====================================================================
                 st.subheader(f"📊 {detail_title_prefix} 용도별 실적 요약")
                 
-                # 건수 및 합계 계산
                 usage_counts = detail_df.groupby('항목').size().reset_index(name='건수')
                 usage_sums = detail_df.groupby('항목')[['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']].sum().reset_index()
                 

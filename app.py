@@ -344,6 +344,16 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         # ==== 1. 데이터 추출 ====
         all_data_unfiltered = []
         
+        def get_multi_col_idx(df_temp, keywords):
+            found_cols = []
+            for col_idx in range(df_temp.shape[1]):
+                for row_idx in range(min(20, df_temp.shape[0])):
+                    val = str(df_temp.iloc[row_idx, col_idx]).replace(" ", "").replace("\n", "")
+                    for kw in keywords:
+                        if kw in val:
+                            found_cols.append(col_idx)
+            return list(set(found_cols))
+        
         for file in uploaded_files:
             try:
                 file.seek(0)
@@ -372,18 +382,29 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                 extracted['차수'] = file_cha
 
-                idx_home = get_col_idx(df, ["가정용"], exact=False)
-                idx_general = get_col_idx(df, ["일반용"], exact=False)
-                idx_total_vol = get_col_idx(df, ["계(MJ)", "계"], exact=False)
+                # [핵심 수정]: MJ 판매량을 다중 컬럼에서 찾아 합산! (가구수 컬럼 회피)
+                home_cols = get_multi_col_idx(df, ["취사용(MJ)", "개별난방용(MJ)", "중앙난방용(MJ)"])
+                gen_cols = get_multi_col_idx(df, ["일반용(영업1)(MJ)", "일반용(영업2)(MJ)"])
+                idx_total_vol = get_col_idx(df, ["계(MJ)"], exact=False)
                 idx_npv = get_col_idx(df, ["NPV"], exact=False)
                 idx_irr = get_col_idx(df, ["IRR"], exact=False)
 
-                extracted['가정용 판매량(MJ)'] = df.iloc[:, idx_home] if idx_home is not None else 0
-                extracted['일반용 판매량(MJ)'] = df.iloc[:, idx_general] if idx_general is not None else 0
-                extracted['합계 판매량(MJ)'] = df.iloc[:, idx_total_vol] if idx_total_vol is not None else 0
-                extracted['NPV(원)'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
-                extracted['IRR(%)'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
+                def get_clean_series(c_idx):
+                    return pd.to_numeric(df.iloc[:, c_idx].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
 
+                extracted['가정용 판매량(MJ)'] = 0
+                for c_idx in home_cols:
+                    extracted['가정용 판매량(MJ)'] += get_clean_series(c_idx)
+
+                extracted['일반용 판매량(MJ)'] = 0
+                for c_idx in gen_cols:
+                    extracted['일반용 판매량(MJ)'] += get_clean_series(c_idx)
+
+                extracted['합계 판매량(MJ)'] = get_clean_series(idx_total_vol) if idx_total_vol is not None else 0
+                extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
+                extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
+
+                # 쓰레기 텍스트 데이터 제거
                 extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                 invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계']
                 extracted = extracted[~extracted['공사명'].isin(invalid_names)]
@@ -547,10 +568,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
                 detail_df = detail_df.reset_index(drop=True)
                 
-                # [수정] 형님 지시사항 적용: 차수 제거하고 항목을 맨 앞으로 이동! 숫자 인덱스 제거(hide_index=True)
                 display_cols = ['항목', '공사명', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
                 
-                # Streamlit dataframe에 hide_index=True 적용하여 앞의 숫자 제거
                 st.dataframe(detail_df[display_cols].style.format({
                     "규모(m)": "{:,.0f}",
                     "투자비(원)": "{:,.0f}",
@@ -561,7 +580,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     "IRR(%)": "{:,.2f}"
                 }), use_container_width=True, hide_index=True)
                 
-                # CSV 다운로드 파일에도 인덱스 숫자 제거 (index=False)
                 csv_data = detail_df[display_cols].to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
                     label="📥 상세 승인내역 CSV 다운로드",

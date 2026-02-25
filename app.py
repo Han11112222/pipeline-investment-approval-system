@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import numpy_financial as npf
 import re
+import plotly.express as px  # 그래프를 예쁘게 그리기 위한 라이브러리 추가
 
 # --------------------------------------------------------------------------
 # [설정] 페이지 기본
@@ -290,8 +291,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
-        st.subheader("🔹 수요개발배관 (실적은 파일 자동 추출)")
-        st.markdown("수요개발배관의 한도액 디폴트값을 확인/수정하세요.")
+        st.subheader("🔹 1. 수요개발배관 (실적은 파일 자동 추출)")
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
             "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
@@ -301,22 +301,35 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
 
-        st.subheader("🔹 기본계획배관 (수기 입력 전용)")
-        st.markdown("다른 팀 공유 자료이므로 **기승인(이전차수)** 및 **금회(현재차수)** 실적을 직접 입력해 주세요.")
+        st.subheader("🔹 2. 기본계획배관 (수기 입력 전용)")
         df_bp_base = pd.DataFrame({
-            "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "인입배관", "공급시설물 개선"],
-            "한도_규모": [2828, 749, 624, 3, 857, 95], 
-            "한도_금액": [2031952014, 626987840, 766452499, 338045023, 3230129038, 2749999724],
-            "기승인_규모": [0, 0, 0, 0, 0, 0],
-            "기승인_금액": [0, 0, 0, 0, 0, 0],
-            "금회_규모": [0, 0, 0, 0, 0, 0],
-            "금회_금액": [0, 0, 0, 0, 0, 0]
+            "항목": ["계획배관", "Loop", "이설배관", "지역정압기", "공급시설물 개선"],
+            "한도_규모": [2828, 749, 624, 3, 95], 
+            "한도_금액": [2031952014, 626987840, 766452499, 338045023, 2749999724],
+            "기승인_규모": [0, 0, 0, 0, 0],
+            "기승인_금액": [0, 0, 0, 0, 0],
+            "금회_규모": [0, 0, 0, 0, 0],
+            "금회_금액": [0, 0, 0, 0, 0]
         })
         edited_bp = st.data_editor(df_bp_base, key="bp_editor", hide_index=True, use_container_width=True)
 
+        st.divider()
+
+        st.subheader("🔹 3. 65A미만 인입 (수기 입력 전용)")
+        df_in_base = pd.DataFrame({
+            "항목": ["65A미만 인입"],
+            "한도_규모": [857], 
+            "한도_금액": [3230129038],
+            "기승인_규모": [0],
+            "기승인_금액": [0],
+            "금회_규모": [0],
+            "금회_금액": [0]
+        })
+        edited_in = st.data_editor(df_in_base, key="in_editor", hide_index=True, use_container_width=True)
+
     # --- 메인 화면 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
-    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관은 수기 입력값**을 더해 엑셀 양식으로 산출합니다.")
+    st.markdown("기초자료 파일을 바탕으로 **수요개발배관은 자동 계산**하고, **기본계획배관 및 65A미만 인입은 수기 입력값**을 더해 산출합니다.")
 
     if uploaded_files:
         st.success("✅ 파일 업로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
@@ -333,11 +346,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             selected_cha_t2 = st.selectbox("📌 기준 차수 선택 (승인 내역용)", available_chas_t2, index=len(available_chas_t2)-1, format_func=lambda x: f"{x}차")
         with col2:
             view_mode_t2 = st.radio("보기 옵션 (데이터 조회 범위)", ["1. 당해차수 데이터", "2. 1차~현재까지 데이터"], key="view_mode_t2")
-
-        if view_mode_t2 == "1. 당해차수 데이터":
-            st.info(f"선택됨: **{selected_cha_t2}차** 당해차수 데이터만 하단 상세 내역에 출력합니다.")
-        else:
-            st.info(f"선택됨: **1차 부터 {selected_cha_t2}차 까지의 누적** 데이터를 하단 상세 내역에 출력합니다.")
             
         st.markdown("---")
 
@@ -468,19 +476,20 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             return df_base
 
 
-        # ==== 3. 프레임 구성 및 총계 산출 ====
+        # ==== 3. 프레임 구성 및 총계 산출 (3가지 카테고리 병합) ====
+        # 1) 수요개발배관
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
         df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', df_sd_display['한도_규모'].sum(), df_sd_display['한도_금액'].sum()] 
         df_sd_display = fill_sd_metrics(df_sd_display)
         
+        # 2) 기본계획배관
         df_bp_display = edited_bp.copy()
         df_bp_display.insert(0, '구분', '기본계획배관')
         df_bp_display['누계_규모'] = df_bp_display['기승인_규모'] + df_bp_display['금회_규모']
         df_bp_display['누계_금액'] = df_bp_display['기승인_금액'] + df_bp_display['금회_금액']
         df_bp_display['잔여_금액'] = df_bp_display['한도_금액'] - df_bp_display['누계_금액']
-        
         bp_sub_row = {
             '구분': '기본계획배관', '항목': '소계',
             '한도_규모': df_bp_display['한도_규모'].sum(), '한도_금액': df_bp_display['한도_금액'].sum(),
@@ -490,27 +499,112 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             '잔여_금액': df_bp_display['잔여_금액'].sum()
         }
         df_bp_display = pd.concat([df_bp_display, pd.DataFrame([bp_sub_row])], ignore_index=True)
+
+        # 3) 65A미만 인입
+        df_in_display = edited_in.copy()
+        df_in_display.insert(0, '구분', '65A미만 인입')
+        df_in_display['누계_규모'] = df_in_display['기승인_규모'] + df_in_display['금회_규모']
+        df_in_display['누계_금액'] = df_in_display['기승인_금액'] + df_in_display['금회_금액']
+        df_in_display['잔여_금액'] = df_in_display['한도_금액'] - df_in_display['누계_금액']
+        in_sub_row = {
+            '구분': '65A미만 인입', '항목': '소계',
+            '한도_규모': df_in_display['한도_규모'].sum(), '한도_금액': df_in_display['한도_금액'].sum(),
+            '기승인_규모': df_in_display['기승인_규모'].sum(), '기승인_금액': df_in_display['기승인_금액'].sum(),
+            '금회_규모': df_in_display['금회_규모'].sum(), '금회_금액': df_in_display['금회_금액'].sum(),
+            '누계_규모': df_in_display['누계_규모'].sum(), '누계_금액': df_in_display['누계_금액'].sum(),
+            '잔여_금액': df_in_display['잔여_금액'].sum()
+        }
+        df_in_display = pd.concat([df_in_display, pd.DataFrame([in_sub_row])], ignore_index=True)
         
-        df_budget_detail = pd.concat([df_sd_display, df_bp_display], ignore_index=True)
+        # 합체 및 총계 산출
+        df_budget_detail = pd.concat([df_sd_display, df_bp_display, df_in_display], ignore_index=True)
         
         sd_sub_idx = len(df_sd_display) - 1
         bp_sub_idx = len(df_bp_display) - 1
+        in_sub_idx = len(df_in_display) - 1
         
-        tot_limit_scale = df_sd_display.at[sd_sub_idx, '한도_규모'] + df_bp_display.at[bp_sub_idx, '한도_규모']
-        tot_limit_amt = df_sd_display.at[sd_sub_idx, '한도_금액'] + df_bp_display.at[bp_sub_idx, '한도_금액']
-        tot_prev_amt = df_sd_display.at[sd_sub_idx, '기승인_금액'] + df_bp_display.at[bp_sub_idx, '기승인_금액']
-        tot_curr_amt = df_sd_display.at[sd_sub_idx, '금회_금액'] + df_bp_display.at[bp_sub_idx, '금회_금액']
-        tot_cum_amt = df_sd_display.at[sd_sub_idx, '누계_금액'] + df_bp_display.at[bp_sub_idx, '누계_금액']
-        tot_remain_amt = df_sd_display.at[sd_sub_idx, '잔여_금액'] + df_bp_display.at[bp_sub_idx, '잔여_금액']
+        tot_limit_scale = df_sd_display.at[sd_sub_idx, '한도_규모'] + df_bp_display.at[bp_sub_idx, '한도_규모'] + df_in_display.at[in_sub_idx, '한도_규모']
+        tot_limit_amt = df_sd_display.at[sd_sub_idx, '한도_금액'] + df_bp_display.at[bp_sub_idx, '한도_금액'] + df_in_display.at[in_sub_idx, '한도_금액']
+        tot_prev_scale = df_sd_display.at[sd_sub_idx, '기승인_규모'] + df_bp_display.at[bp_sub_idx, '기승인_규모'] + df_in_display.at[in_sub_idx, '기승인_규모']
+        tot_prev_amt = df_sd_display.at[sd_sub_idx, '기승인_금액'] + df_bp_display.at[bp_sub_idx, '기승인_금액'] + df_in_display.at[in_sub_idx, '기승인_금액']
+        tot_curr_scale = df_sd_display.at[sd_sub_idx, '금회_규모'] + df_bp_display.at[bp_sub_idx, '금회_규모'] + df_in_display.at[in_sub_idx, '금회_규모']
+        tot_curr_amt = df_sd_display.at[sd_sub_idx, '금회_금액'] + df_bp_display.at[bp_sub_idx, '금회_금액'] + df_in_display.at[in_sub_idx, '금회_금액']
+        tot_cum_scale = df_sd_display.at[sd_sub_idx, '누계_규모'] + df_bp_display.at[bp_sub_idx, '누계_규모'] + df_in_display.at[in_sub_idx, '누계_규모']
+        tot_cum_amt = df_sd_display.at[sd_sub_idx, '누계_금액'] + df_bp_display.at[bp_sub_idx, '누계_금액'] + df_in_display.at[in_sub_idx, '누계_금액']
+        tot_remain_amt = df_sd_display.at[sd_sub_idx, '잔여_금액'] + df_bp_display.at[bp_sub_idx, '잔여_금액'] + df_in_display.at[in_sub_idx, '잔여_금액']
 
         df_budget_detail.loc[len(df_budget_detail)] = [
             '합계', '총계', 
             tot_limit_scale, tot_limit_amt,          
-            df_sd_display.at[sd_sub_idx, '기승인_규모'] + df_bp_display.at[bp_sub_idx, '기승인_규모'], tot_prev_amt,                      
-            df_sd_display.at[sd_sub_idx, '금회_규모'] + df_bp_display.at[bp_sub_idx, '금회_규모'], tot_curr_amt,             
-            df_sd_display.at[sd_sub_idx, '누계_규모'] + df_bp_display.at[bp_sub_idx, '누계_규모'], tot_cum_amt,                 
+            tot_prev_scale, tot_prev_amt,                      
+            tot_curr_scale, tot_curr_amt,             
+            tot_cum_scale, tot_cum_amt,                 
             tot_remain_amt                     
         ]
+
+
+        # =====================================================================
+        # [신규 추가] 상단 전체 요약 표 & 그래프
+        # =====================================================================
+        st.subheader("📈 2026년 배관 투자 전체 요약 및 진척도")
+        
+        sum_df = pd.DataFrame({
+            "구분": ["수요개발배관", "기본계획배관", "65A미만 인입", "총계"],
+            "총 투자한도액": [df_sd_display.at[sd_sub_idx, '한도_금액'], df_bp_display.at[bp_sub_idx, '한도_금액'], df_in_display.at[in_sub_idx, '한도_금액'], tot_limit_amt],
+            "기승인 누계": [df_sd_display.at[sd_sub_idx, '기승인_금액'], df_bp_display.at[bp_sub_idx, '기승인_금액'], df_in_display.at[in_sub_idx, '기승인_금액'], tot_prev_amt],
+            f"금회 신청 ({selected_cha_t2}차)": [df_sd_display.at[sd_sub_idx, '금회_금액'], df_bp_display.at[bp_sub_idx, '금회_금액'], df_in_display.at[in_sub_idx, '금회_금액'], tot_curr_amt],
+            "현재 본부 누계": [df_sd_display.at[sd_sub_idx, '누계_금액'], df_bp_display.at[bp_sub_idx, '누계_금액'], df_in_display.at[in_sub_idx, '누계_금액'], tot_cum_amt],
+            "잔여 한도액": [df_sd_display.at[sd_sub_idx, '잔여_금액'], df_bp_display.at[bp_sub_idx, '잔여_금액'], df_in_display.at[in_sub_idx, '잔여_금액'], tot_remain_amt]
+        })
+        sum_df['집행률(%)'] = np.where(sum_df['총 투자한도액'] > 0, (sum_df['현재 본부 누계'] / sum_df['총 투자한도액']) * 100, 0)
+        
+        # 1. 가로형 숫자 요약 표 렌더링
+        st.dataframe(sum_df.style.format({
+            "총 투자한도액": "{:,.0f}", "기승인 누계": "{:,.0f}", f"금회 신청 ({selected_cha_t2}차)": "{:,.0f}",
+            "현재 본부 누계": "{:,.0f}", "잔여 한도액": "{:,.0f}", "집행률(%)": "{:,.1f}%"
+        }).apply(lambda x: ['background-color: #FFE6E6; font-weight: bold'] * len(x) if x['구분'] == '총계' else [''] * len(x), axis=1), 
+        hide_index=True, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 2. 하단 그래프 영역 (좌: 항목별 막대, 우: 전체 도넛)
+        col_c1, col_c2 = st.columns([2, 1.5])
+        
+        with col_c1:
+            st.markdown("#### 📊 구분별 투자 예산 및 실적 현황")
+            chart_df = sum_df.iloc[:3].copy()
+            # Plotly 막대그래프용 데이터 재구성
+            bar_data = pd.DataFrame({
+                "구분": chart_df["구분"].tolist() * 2,
+                "금액(원)": chart_df["총 투자한도액"].tolist() + chart_df["현재 본부 누계"].tolist(),
+                "유형": ["총 투자한도액"] * 3 + ["현재 본부 누계"] * 3
+            })
+            fig_bar = px.bar(bar_data, x="구분", y="금액(원)", color="유형", barmode="group",
+                             color_discrete_map={"총 투자한도액": "#1E88E5", "현재 본부 누계": "#FFB300"})
+            fig_bar.update_layout(margin=dict(t=20, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        with col_c2:
+            st.markdown("#### 🍩 전체 투자계획 대비 실적")
+            donut_rem = tot_remain_amt if tot_remain_amt > 0 else 0
+            donut_df = pd.DataFrame({
+                "상태": ["실적 (누계)", "잔여 한도액"],
+                "금액": [tot_cum_amt, donut_rem]
+            })
+            fig_donut = px.pie(donut_df, values='금액', names='상태', hole=0.5, 
+                               color='상태', color_discrete_map={"실적 (누계)": "#FFB300", "잔여 한도액": "#E0E0E0"})
+            fig_donut.update_traces(textinfo='percent+label', textposition='inside')
+            
+            exec_rate = (tot_cum_amt / tot_limit_amt * 100) if tot_limit_amt > 0 else 0
+            fig_donut.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0), 
+                                    annotations=[dict(text=f"집행률<br><b>{exec_rate:.1f}%</b>", x=0.5, y=0.5, font_size=18, showarrow=False)])
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        st.divider()
+
+
+        # ==== 4. 엑셀 스타일 상세 표 렌더링 ====
+        st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
 
         df_budget_detail['승인비율'] = np.where(df_budget_detail['한도_금액'] > 0, (df_budget_detail['누계_금액'] / df_budget_detail['한도_금액']) * 100, 0)
         df_budget_detail['구분'] = df_budget_detail['구분'].mask(df_budget_detail['구분'].duplicated(), '')
@@ -524,40 +618,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             ('투자한도 잔액', '금액'), ('승인비율', '(%)')
         ])
 
-
-        # =====================================================================
-        # [신규 추가] 상단 전체 요약 및 차트 (위-아래 배치)
-        # =====================================================================
-        st.subheader("📈 2026년 배관 투자 전체 요약 및 진척도")
-        
-        exec_rate = (tot_cum_amt / tot_limit_amt * 100) if tot_limit_amt > 0 else 0
-        
-        # 1. 상단: 가로형 숫자 요약 표
-        sum_df = pd.DataFrame({
-            "총 투자한도액": [tot_limit_amt],
-            "기승인 누계": [tot_prev_amt],
-            f"금회 신청 ({selected_cha_t2}차)": [tot_curr_amt],
-            "현재 본부 누계": [tot_cum_amt],
-            "잔여 한도액": [tot_remain_amt]
-        })
-        st.dataframe(sum_df.style.format("{:,.0f}"), hide_index=True, use_container_width=True)
-        st.markdown(f"**🔥 현재 예산 집행률 (누계 기준): <span style='color: #E53935; font-size: 18px;'>{exec_rate:.1f}%</span>**", unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True) # 여백
-        
-        # 2. 하단: 막대 그래프
-        chart_data = pd.DataFrame({
-            "구분": ["총 투자한도액", "본부투자 누계"],
-            "금액(원)": [tot_limit_amt, tot_cum_amt]
-        }).set_index("구분")
-        st.bar_chart(chart_data, height=250)
-            
-        st.divider()
-
-
-        # ==== 4. 엑셀 스타일 상세 표 렌더링 ====
-        st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
-        
         def style_rows(row):
             if row[('항목', '')] == '소계':
                 return ['background-color: #E6F3FF; font-weight: bold'] * len(row)
@@ -586,19 +646,14 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 # =====================================================================
                 # [신규 추가] 용도별 요약 표 (건수 추가)
                 # =====================================================================
-                st.subheader(f"📊 {detail_title_prefix} 용도별 요약")
+                st.subheader(f"📊 {detail_title_prefix} 용도별 실적 요약")
                 
-                # 건수 계산
+                # 건수 및 합계 계산
                 usage_counts = detail_df.groupby('항목').size().reset_index(name='건수')
-                # 합계 계산
                 usage_sums = detail_df.groupby('항목')[['규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']].sum().reset_index()
                 
-                # 병합 및 컬럼 순서 정리
                 usage_summary = pd.merge(usage_counts, usage_sums, on='항목')
-                cols_order = ['항목', '건수', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)']
-                usage_summary = usage_summary[cols_order]
                 
-                # 총계 행 추가
                 usage_summary.loc[len(usage_summary)] = [
                     '총계', 
                     usage_summary['건수'].sum(),
@@ -609,7 +664,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     usage_summary['합계 판매량(MJ)'].sum()
                 ]
                 
-                # 표 렌더링
                 st.dataframe(usage_summary.style.format({
                     "건수": "{:,.0f} 건",
                     "규모(m)": "{:,.0f}",
@@ -620,12 +674,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 }).apply(lambda x: ['background-color: #F5F5F5; font-weight: bold'] * len(x) if x['항목'] == '총계' else [''] * len(x), axis=1), 
                 hide_index=True, use_container_width=True)
                 
-                st.markdown("<br>", unsafe_allow_html=True) # 줄바꿈 여백
+                st.markdown("<br>", unsafe_allow_html=True)
                 
                 # =====================================================================
                 # 기존 상세 승인 내역 리스트
                 # =====================================================================
-                st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역")
+                st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역 리스트")
                 
                 detail_df = detail_df.reset_index(drop=True)
                 display_cols = ['항목', '공사명', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']

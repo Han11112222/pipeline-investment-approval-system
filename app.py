@@ -291,7 +291,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 # ==========================================================================
 elif menu_choice == '2. 배관 투자 승인 내역':
     
-    # [핵심 수정] 공무팀 현황정리 파일 파싱 로직 (열 번호 완벽 재조정)
+    # [핵심 수정] 띄어쓰기 및 줄바꿈을 완벽히 무시하는 정규화 매핑 추가
     extracted_bp_data = {}
     if uploaded_files:
         for file in uploaded_files:
@@ -308,26 +308,27 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     for row_idx in range(df_status.shape[0]):
                         col1_val = str(df_status.iloc[row_idx, 1]).strip()
+                        # 모든 공백과 줄바꿈 제거한 클린 키 생성
+                        clean_col1 = col1_val.replace('\n', '').replace(' ', '')
                         
-                        target_items = ['계획배관', 'Loop', '이설배관', '지역정압기', '지역\n정압기', '공급시설물 개선', '공급시설물\n개선', '인입배관']
+                        target_items = ['계획배관', 'Loop', '이설배관', '지역정압기', '공급시설물개선', '인입배관']
                         
-                        if any(item in col1_val for item in target_items):
-                            try:
-                                # [수정 완료] 12=기승인규모, 13=기승인금액, 15=금회규모, 16=금회금액
-                                p_scale = pd.to_numeric(str(df_status.iloc[row_idx, 12]).replace(',', ''), errors='coerce')
-                                p_amt = pd.to_numeric(str(df_status.iloc[row_idx, 13]).replace(',', ''), errors='coerce')
-                                c_scale = pd.to_numeric(str(df_status.iloc[row_idx, 15]).replace(',', ''), errors='coerce')
-                                c_amt = pd.to_numeric(str(df_status.iloc[row_idx, 16]).replace(',', ''), errors='coerce')
-                                
-                                clean_key = col1_val.replace('\n', '')
-                                extracted_bp_data[clean_key] = {
-                                    '기승인_규모': p_scale if not pd.isna(p_scale) else 0,
-                                    '기승인_금액': p_amt if not pd.isna(p_amt) else 0,
-                                    '금회_규모': c_scale if not pd.isna(c_scale) else 0,
-                                    '금회_금액': c_amt if not pd.isna(c_amt) else 0
-                                }
-                            except:
-                                pass
+                        for item in target_items:
+                            if item in clean_col1:
+                                try:
+                                    p_scale = pd.to_numeric(str(df_status.iloc[row_idx, 12]).replace(',', ''), errors='coerce')
+                                    p_amt = pd.to_numeric(str(df_status.iloc[row_idx, 13]).replace(',', ''), errors='coerce')
+                                    c_scale = pd.to_numeric(str(df_status.iloc[row_idx, 15]).replace(',', ''), errors='coerce')
+                                    c_amt = pd.to_numeric(str(df_status.iloc[row_idx, 16]).replace(',', ''), errors='coerce')
+                                    
+                                    extracted_bp_data[item] = {
+                                        '기승인_규모': p_scale if not pd.isna(p_scale) else 0,
+                                        '기승인_금액': p_amt if not pd.isna(p_amt) else 0,
+                                        '금회_규모': c_scale if not pd.isna(c_scale) else 0,
+                                        '금회_금액': c_amt if not pd.isna(c_amt) else 0
+                                    }
+                                except:
+                                    pass
                 except Exception as e:
                     pass
 
@@ -355,7 +356,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         bp_p_s, bp_p_a, bp_c_s, bp_c_a = [], [], [], []
         
         for item in bp_items:
-            clean_item = item.replace('\n', '')
+            # 베이스 아이템 이름도 공백을 모두 지워서 딕셔너리 매칭
+            clean_item = item.replace('\n', '').replace(' ', '')
             if clean_item in extracted_bp_data:
                 bp_p_s.append(extracted_bp_data[clean_item]['기승인_규모'])
                 bp_p_a.append(extracted_bp_data[clean_item]['기승인_금액'])
@@ -554,18 +556,19 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
 
         # ==== 3. 프레임 구성 및 총계 산출 ====
+        # 1) 수요개발배관
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
         df_sd_display.loc[len(df_sd_display)] = ['수요개발배관', '소계', df_sd_display['한도_규모'].sum(), df_sd_display['한도_금액'].sum()] 
         df_sd_display = fill_sd_metrics(df_sd_display)
         
+        # 2) 기본계획배관
         df_bp_display = edited_bp.copy()
         df_bp_display.insert(0, '구분', '기본계획배관')
         df_bp_display['누계_규모'] = df_bp_display['기승인_규모'] + df_bp_display['금회_규모']
         df_bp_display['누계_금액'] = df_bp_display['기승인_금액'] + df_bp_display['금회_금액']
         df_bp_display['잔여_금액'] = df_bp_display['한도_금액'] - df_bp_display['누계_금액']
-        
         bp_sub_row = {
             '구분': '기본계획배관', '항목': '소계',
             '한도_규모': df_bp_display['한도_규모'].sum(), '한도_금액': df_bp_display['한도_금액'].sum(),
@@ -576,6 +579,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         }
         df_bp_display = pd.concat([df_bp_display, pd.DataFrame([bp_sub_row])], ignore_index=True)
 
+        # 3) 65A미만 인입
         df_in_display = edited_in.copy()
         df_in_display.insert(0, '구분', '65A미만 인입')
         df_in_display['누계_규모'] = df_in_display['기승인_규모'] + df_in_display['금회_규모']
@@ -591,6 +595,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         }
         df_in_display = pd.concat([df_in_display, pd.DataFrame([in_sub_row])], ignore_index=True)
         
+        # 합체 및 총계 산출
         df_budget_detail = pd.concat([df_sd_display, df_bp_display, df_in_display], ignore_index=True)
         
         sd_sub_idx = len(df_sd_display) - 1

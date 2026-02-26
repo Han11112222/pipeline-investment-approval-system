@@ -262,15 +262,20 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
+            # --- 수정된 부분 1: Pandas Styler를 적용하여 금액 단위 콤마와 길이 정수(0자리) 포맷 처리 ---
+            styled_df_usage = df_usage_summary.style.format({
+                "총 투자길이(m)": "{:,.0f}",
+                "총 순투자액(원)": "{:,.0f}",
+                "연간판매량(MJ)": "{:,.0f}",
+                "NPV(원)": "{:,.0f}",
+                "IRR(%)": "{:,.2f}"
+            })
+
             edited_df = st.data_editor(
-                df_usage_summary,
+                styled_df_usage,
                 column_config={
-                    "선택": st.column_config.CheckboxColumn("선택"),
-                    "총 투자길이(m)": st.column_config.NumberColumn(format="%.1f"),
-                    "총 순투자액(원)": st.column_config.NumberColumn(format="%.0f"),
-                    "연간판매량(MJ)": st.column_config.NumberColumn(format="%.0f"),
-                    "NPV(원)": st.column_config.NumberColumn(format="%.0f"),
-                    "IRR(%)": st.column_config.NumberColumn(format="%.2f")
+                    "선택": st.column_config.CheckboxColumn("선택")
+                    # 숫자 컬럼들은 style.format이 우선 적용되도록 column_config 포맷 제외
                 },
                 disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
                 hide_index=True,
@@ -292,7 +297,14 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "항목명": "☑️ 선택 용도 총합계",
                     "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
                 }])
-                st.dataframe(subtotal_df.style.format({"{:,.1f}": "총 투자길이(m)", "총 순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"}), hide_index=True)
+                
+                # --- 수정된 부분 2: 딕셔너리 문법 수정 및 길이 소수점 제거 ---
+                st.dataframe(subtotal_df.style.format({
+                    "총 투자길이(m)": "{:,.0f}", 
+                    "총 순투자액(원)": "{:,.0f}", 
+                    "연간판매량(MJ)": "{:,.0f}", 
+                    "NPV(원)": "{:,.0f}"
+                }), hide_index=True)
 
                 st.divider()
 
@@ -307,8 +319,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                         "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
                     })
                     
+                # --- 수정된 부분 3: 길이 소수점 제거 및 콤마 반영 ---
                 st.dataframe(pd.DataFrame(detail_results).style.format({
-                    "투자길이(m)": "{:,.1f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
+                    "투자길이(m)": "{:,.0f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
                     "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
                 }), use_container_width=True, hide_index=True)
     else:

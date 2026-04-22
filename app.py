@@ -265,10 +265,12 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
             
-            # --- [수정] 용도 출력 순서 고정 ---
-            custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "ROE"]
+            # --- [수정] 용도 출력 순서 고정 (ROE 무조건 최하단) ---
+            custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
-            sorted_usages = sorted(unique_usages, key=lambda x: custom_order.index(x) if x in custom_order else 999)
+            
+            # ROE는 무조건 9999 부여, custom_order에 있으면 해당 인덱스, 그 외 기타 용도는 999 부여
+            sorted_usages = sorted(unique_usages, key=lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
             
             usage_results = []
             for u in sorted_usages:
@@ -336,8 +338,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 st.subheader("3. 📑 구간별 경제성 상세 명세서")
                 df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
                 
-                # --- [수정] 상세 명세서도 동일한 용도 순서로 정렬 ---
-                df_detail['용도_순위'] = df_detail['용도'].apply(lambda x: custom_order.index(x) if x in custom_order else 999)
+                # --- [수정] 상세 명세서도 동일한 기준으로 정렬 (ROE 무조건 최하단) ---
+                df_detail['용도_순위'] = df_detail['용도'].apply(lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
                 df_detail = df_detail.sort_values(by=['용도_순위', '구간명']).drop(columns=['용도_순위'])
                 # ---------------------------------------------------
                 

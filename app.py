@@ -265,11 +265,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
             
-            # --- [수정] 용도 출력 순서 고정 (ROE 무조건 최하단) ---
             custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
             
-            # ROE는 무조건 9999 부여, custom_order에 있으면 해당 인덱스, 그 외 기타 용도는 999 부여
             sorted_usages = sorted(unique_usages, key=lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
             
             usage_results = []
@@ -338,10 +336,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 st.subheader("3. 📑 구간별 경제성 상세 명세서")
                 df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
                 
-                # --- [수정] 상세 명세서도 동일한 기준으로 정렬 (ROE 무조건 최하단) ---
                 df_detail['용도_순위'] = df_detail['용도'].apply(lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
                 df_detail = df_detail.sort_values(by=['용도_순위', '구간명']).drop(columns=['용도_순위'])
-                # ---------------------------------------------------
                 
                 detail_results = []
                 for _, row in df_detail.iterrows():
@@ -432,7 +428,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                         df = pd.read_excel(file_obj, header=None)
 
                     extracted = pd.DataFrame()
-                    extracted['항목'] = df.iloc[:, 0].astype(str).str.strip().replace(['nan', 'None', ''], np.nan).ffill().fillna('미분류')
+                    
+                    # --- [수정 핵심 1] 탭 1과 동일하게 빈칸 채우기(ffill) 제거 및 빈 항목 행 원천 제외 ---
+                    extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
+                    extracted = extracted[~extracted['항목'].isin(['nan', 'None', '', '미분류'])]
+                    # ----------------------------------------------------------------------------------
                     
                     if df.shape[1] > 6:
                         extracted['규모(m)'] = df.iloc[:, 5]
@@ -466,9 +466,14 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
+                    # --- [수정 핵심 2] 탭 1과 동일한 중복 및 요약 행 클렌징 로직 ---
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
-                    invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계']
+                    invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계', 'ROE제외']
                     extracted = extracted[~extracted['공사명'].isin(invalid_names)]
+                    extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
+                    
+                    extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
+                    # ----------------------------------------------------------------
                     
                     def clean_numeric(x):
                         s = str(x).replace(',', '')
@@ -804,6 +809,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
                 usage_summary = pd.merge(usage_counts, usage_sums, on='항목')
                 
+                # --- [수정] 탭 2 요약표에도 정렬 로직 적용 ---
+                custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용"]
+                usage_summary['용도_순위'] = usage_summary['항목'].apply(lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
+                usage_summary = usage_summary.sort_values(by=['용도_순위']).drop(columns=['용도_순위'])
+                # ----------------------------------------------
+                
                 usage_summary.loc[len(usage_summary)] = [
                     '총계', 
                     usage_summary['건수'].sum(),
@@ -829,6 +840,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 st.subheader(f"📝 {detail_title_prefix} 상세 승인 내역 리스트")
                 
                 detail_df = detail_df.reset_index(drop=True)
+                
+                # --- [수정] 탭 2 상세 리스트 정렬 로직 적용 ---
+                detail_df['용도_순위'] = detail_df['항목'].apply(lambda x: 9999 if x == 'ROE' else (custom_order.index(x) if x in custom_order else 999))
+                detail_df = detail_df.sort_values(by=['용도_순위', '공사명']).drop(columns=['용도_순위']).reset_index(drop=True)
+                # ----------------------------------------------
+                
                 display_cols = ['항목', '공사명', '규모(m)', '투자비(원)', '가정용 판매량(MJ)', '일반용 판매량(MJ)', '합계 판매량(MJ)', 'NPV(원)', 'IRR(%)']
                 
                 st.dataframe(detail_df[display_cols].style.format({

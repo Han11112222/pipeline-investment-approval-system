@@ -153,9 +153,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 else:
                     df = pd.read_excel(file_obj, header=None)
 
-                # --- [수정] '용도' 열을 동적으로 찾지 않고 무조건 A열(인덱스 0)로 고정하여 E19 셀 간섭 차단 ---
                 idx_usage = 0 
-                # ------------------------------------------------------------------------------------------------
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
                 idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
                 idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
@@ -209,10 +207,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             
             clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
-            
-            # --- [수정] A열 맨 위에 있는 '용도'라는 글자 자체가 데이터로 들어오지 못하게 필터링 ---
             clean_df = clean_df[~clean_df['용도'].isin(['', 'nan', 'None', '미분류', '용도'])]
-            # ----------------------------------------------------------------------------------------
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
@@ -435,11 +430,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     extracted = pd.DataFrame()
                     
-                    # --- [수정] 탭 2에서도 A열(인덱스 0)만 고정 참조, 상단 '항목'이나 '용도' 글자 필터링 강화 ---
+                    # --- [수정 핵심] 열 데이터를 모두 구성한 후 마지막에 'None' 등 불필요 행을 일괄 필터링하도록 순서 변경 ---
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
-                    extracted = extracted[~extracted['항목'].isin(['nan', 'None', '', '미분류', '용도', '항목'])]
-                    # ---------------------------------------------------------------------------------------------
                     
                     if df.shape[1] > 6:
                         extracted['규모(m)'] = df.iloc[:, 5]
@@ -473,12 +466,19 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
+                    # 1. 공사명 기준 필터링
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계', 'ROE제외']
                     extracted = extracted[~extracted['공사명'].isin(invalid_names)]
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
                     
+                    # 2. 항목(A열) 기준 엄격한 필터링 (None, nan, 빈칸 등 완전 차단)
+                    invalid_usages = ['', 'nan', 'none', 'null', '미분류', '용도', '항목']
+                    extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
+                    
+                    # 3. 중복 제거
                     extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
+                    # ------------------------------------------------------------------------------------------------------
                     
                     def clean_numeric(x):
                         s = str(x).replace(',', '')

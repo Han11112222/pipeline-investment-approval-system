@@ -166,7 +166,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 idx_rev = get_col_idx(df, ["연간판매액", "판매액"], exact=False)
                 idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
                 
-                # --- [수정] 엑셀의 원본 NPV와 IRR 열 찾기 ---
                 idx_npv = get_col_idx(df, ["NPV"], exact=False)
                 idx_irr = get_col_idx(df, ["IRR"], exact=False)
 
@@ -188,7 +187,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 mapped_data['판매액'] = df.iloc[:, idx_rev] if idx_rev is not None else 0
                 mapped_data['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
                 
-                # --- [수정] 원본 데이터 저장 ---
                 mapped_data['원본_NPV'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
                 mapped_data['원본_IRR'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
 
@@ -212,7 +210,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
-            # --- [수정] 원본 NPV, IRR 숫자 변환 포함 ---
             num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가', '원본_NPV', '원본_IRR']
             for c in num_cols_base:
                 if clean_df[c].dtype == object:
@@ -227,7 +224,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             is_home = temp_usage.str.contains('주택|가정|공동|택지') & ~temp_usage.str.contains('외')
             clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
             
-            # --- [수정] 사용할 숫자 컬럼 목록에 원본 데이터 추가 ---
             num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익', '원본_NPV', '원본_IRR']
 
             st.success("✅ 기초자료 로드 완료! 아래에서 분석할 데이터의 범위를 선택해 주세요.")
@@ -250,7 +246,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 
             st.markdown("---")
 
-            # --- [핵심 수정] 용도를 매개변수로 받아서 공공택지일 경우 원본 NPV와 IRR을 내보내도록 수정 ---
             def get_analysis_result(row, usage_val=''):
                 npv_sim, irr_sim, irr_msg_sim, _ = calculate_simulation(
                     row['길이'], row['투자비'], row['분담금'], row['기타이익'], row['판매량'], row['판매액'], row['판매원가'], 
@@ -270,10 +265,14 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
             
+            # --- [수정] 용도 출력 순서 고정 ---
+            custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "ROE"]
+            unique_usages = filtered_clean_df['용도'].unique().tolist()
+            sorted_usages = sorted(unique_usages, key=lambda x: custom_order.index(x) if x in custom_order else 999)
+            
             usage_results = []
-            for u in filtered_clean_df['용도'].unique():
+            for u in sorted_usages:
                 u_df = filtered_clean_df[filtered_clean_df['용도'] == u]
-                # [수정] 용도(u)를 함수에 함께 전달
                 u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum(), u)
                 is_selected = False if 'ROE' in str(u).upper() else True
                 
@@ -313,7 +312,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
                 t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum(), '합산')
                 
-                # --- [핵심 수정] 합산(Subtotal)시 공공택지의 시뮬레이션 계산 개입을 막기 위해 개별 NPV를 그대로 더함 ---
                 tot_npv = sum(item["NPV(원)"] for item in usage_results if item["용도"] in selected_usages)
 
                 st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
@@ -337,9 +335,14 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
                 st.subheader("3. 📑 구간별 경제성 상세 명세서")
                 df_detail = final_filtered_df.groupby(['용도', '구간명'])[num_cols].sum().reset_index()
+                
+                # --- [수정] 상세 명세서도 동일한 용도 순서로 정렬 ---
+                df_detail['용도_순위'] = df_detail['용도'].apply(lambda x: custom_order.index(x) if x in custom_order else 999)
+                df_detail = df_detail.sort_values(by=['용도_순위', '구간명']).drop(columns=['용도_순위'])
+                # ---------------------------------------------------
+                
                 detail_results = []
                 for _, row in df_detail.iterrows():
-                    # [수정] 구간별 상세 내역 계산 시에도 용도값을 전달하여 공공택지 여부 식별
                     d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row, row['용도'])
                     detail_results.append({
                         "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len,

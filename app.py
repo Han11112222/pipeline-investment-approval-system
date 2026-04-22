@@ -198,7 +198,11 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
             invalid_names = ['', '0', 'nan', 'None', '구간명']
             clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
-            clean_df['용도'] = clean_df['용도'].astype(str).str.strip().ffill().fillna('미분류')
+            
+            # --- [요청사항 완벽 반영] A열 '용도'에 값이 명확히 존재하는 행만 필터링 (하단 참고용 합계행 원천 제외) ---
+            clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
+            clean_df = clean_df[~clean_df['용도'].isin(['', 'nan', 'None', '미분류'])]
+            # --------------------------------------------------------------------------------------------------------
 
             # [핵심 수정 1] 동일 차수 내에 같은 구간명이 여러 줄 있을 경우, 가장 마지막 줄(최신) 데이터만 남겨 중복 합산을 방지합니다.
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')

@@ -200,6 +200,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             clean_df = clean_df[~clean_df['구간명'].isin(invalid_names)]
             clean_df['용도'] = clean_df['용도'].astype(str).str.strip().ffill().fillna('미분류')
 
+            # [핵심 수정 1] 동일 차수 내에 같은 구간명이 여러 줄 있을 경우, 가장 마지막 줄(최신) 데이터만 남겨 중복 합산을 방지합니다.
+            clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
+
             num_cols_base = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가']
             for c in num_cols_base:
                 if clean_df[c].dtype == object:
@@ -210,7 +213,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             
             clean_df['기본요금수익'] = 0.0
             temp_usage = clean_df['용도'].astype(str).str.replace(' ', '', regex=False)
-            is_home = temp_usage.str.contains('주택|가정|공동') & ~temp_usage.str.contains('외')
+            
+            # [핵심 수정 2] 기본요금 산정 기준에 '택지'를 추가하여 공공택지(공동주택)의 전수도 기본요금으로 자동 계산되게 합니다.
+            is_home = temp_usage.str.contains('주택|가정|공동|택지') & ~temp_usage.str.contains('외')
             clean_df.loc[is_home, '기본요금수익'] = clean_df.loc[is_home, '총전수'] * sim_basic_price * 12
             
             num_cols = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익']
@@ -262,7 +267,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
-            # --- 수정된 부분 1: Pandas Styler를 적용하여 금액 단위 콤마와 길이 정수(0자리) 포맷 처리 ---
             styled_df_usage = df_usage_summary.style.format({
                 "총 투자길이(m)": "{:,.0f}",
                 "총 순투자액(원)": "{:,.0f}",
@@ -275,7 +279,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 styled_df_usage,
                 column_config={
                     "선택": st.column_config.CheckboxColumn("선택")
-                    # 숫자 컬럼들은 style.format이 우선 적용되도록 column_config 포맷 제외
                 },
                 disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
                 hide_index=True,
@@ -298,7 +301,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
                 }])
                 
-                # --- 수정된 부분 2: 딕셔너리 문법 수정 및 길이 소수점 제거 ---
                 st.dataframe(subtotal_df.style.format({
                     "총 투자길이(m)": "{:,.0f}", 
                     "총 순투자액(원)": "{:,.0f}", 
@@ -319,14 +321,12 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                         "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
                     })
                     
-                # --- 수정된 부분 3: 길이 소수점 제거 및 콤마 반영 ---
                 st.dataframe(pd.DataFrame(detail_results).style.format({
                     "투자길이(m)": "{:,.0f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
                     "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
                 }), use_container_width=True, hide_index=True)
     else:
         st.info("👆 좌측 사이드바에 파일이 로드되지 않았습니다. 깃허브에 파일을 올리거나 직접 업로드 해주세요.")
-
 
 # ==========================================================================
 # 탭 2: 신규 배관 투자 승인 내역 자동화
@@ -489,9 +489,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         
         st.divider()
 
-        # =====================================================================
         # [신규 추가] 스마트 자동 이월(Carry-over) 로직
-        # =====================================================================
         available_bp_chas = [c for c in extracted_bp_data_by_cha.keys() if c <= selected_cha_t2]
         if available_bp_chas:
             latest_bp_cha = max(available_bp_chas)
@@ -518,13 +516,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             clean_item = item.replace('\n', '').replace(' ', '')
             if clean_item in latest_bp_data:
                 if latest_bp_cha == selected_cha_t2:
-                    # 정확히 그 차수 파일이 있으면 그대로 매핑
                     bp_p_s.append(latest_bp_data[clean_item]['기승인_규모'])
                     bp_p_a.append(latest_bp_data[clean_item]['기승인_금액'])
                     bp_c_s.append(latest_bp_data[clean_item]['금회_규모'])
                     bp_c_a.append(latest_bp_data[clean_item]['금회_금액'])
                 else:
-                    # 그 차수 파일이 없으면 과거 누계(기승인+금회)를 모두 끌어와서 현재의 '기승인'으로 이월
                     bp_p_s.append(latest_bp_data[clean_item]['기승인_규모'] + latest_bp_data[clean_item]['금회_규모'])
                     bp_p_a.append(latest_bp_data[clean_item]['기승인_금액'] + latest_bp_data[clean_item]['금회_금액'])
                     bp_c_s.append(0)
@@ -619,8 +615,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
             return df_base
 
-
-        # ==== 프레임 구성 및 총계 산출 ====
         df_sd_display = edited_sd.copy()
         df_sd_display.rename(columns={'규모': '한도_규모', '금액': '한도_금액'}, inplace=True)
         df_sd_display.insert(0, '구분', '수요개발배관')
@@ -682,9 +676,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             tot_remain_amt                     
         ]
 
-        # =====================================================================
-        # 상단 전체 요약 표 & 그래프
-        # =====================================================================
         st.subheader("📈 2026년 배관 투자 전체 요약 및 진척도")
         
         sum_df = pd.DataFrame({
@@ -738,8 +729,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
         st.divider()
 
-
-        # ==== 4. 엑셀 스타일 상세 표 렌더링 ====
         st.subheader("📌 2026년 배관 투자 승인 요약 (Excel 양식)")
 
         df_budget_detail['승인비율'] = np.where(df_budget_detail['한도_금액'] > 0, (df_budget_detail['누계_금액'] / df_budget_detail['한도_금액']) * 100, 0)
@@ -768,8 +757,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         st.dataframe(styled_df, hide_index=True, use_container_width=True)
         st.divider()
         
-        
-        # ==== 하단: 필터링 조건에 맞는 상세 데이터 표출 ====
         if not all_parsed_df.empty:
             if view_mode_t2 == "1. 당해차수 데이터":
                 detail_df = all_parsed_df[all_parsed_df['차수'] == selected_cha_t2]

@@ -68,6 +68,15 @@ def get_col_idx(df, keywords, exact=False):
 # [UI] 공통 사이드바 (파일 업로드 및 자동 스캔)
 # --------------------------------------------------------------------------
 with st.sidebar:
+    # --- [수정] 메뉴 네비게이션을 가장 상단으로 이동 ---
+    st.title("메뉴 네비게이션")
+    menu_choice = st.radio(
+        "이동할 페이지를 선택하세요:",
+        ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
+    )
+    st.divider()
+    # ---------------------------------------------------
+
     st.header("📂 데이터 로드 (자동/수동)")
     st.markdown("깃허브에 올린 엑셀 파일을 자동으로 찾아냅니다. (급할 땐 아래에 바로 드래그 업로드 가능)")
     
@@ -98,13 +107,6 @@ with st.sidebar:
         else:
             st.warning("⚠️ 깃허브에서 엑셀 파일을 찾지 못했습니다. 깃허브 동기화를 기다리거나 수동 업로드 하세요.")
             
-    st.divider()
-
-    st.title("메뉴 네비게이션")
-    menu_choice = st.radio(
-        "이동할 페이지를 선택하세요:",
-        ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
-    )
     st.divider()
 
 # ==========================================================================
@@ -212,7 +214,9 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
-            clean_df = clean_df[~clean_df['구간명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]
+            invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
+            clean_df = clean_df[~clean_df['구간명'].str.lower().isin(invalid_names)]
+            clean_df = clean_df[~clean_df['구간명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
@@ -282,7 +286,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum(), u)
                 is_selected = False if '투자보수율가산' in str(u) else True
                 
-                # --- [수정] 탭 1 요약표 열 구성 변경 (투자길이, 투자금액, 공급전수, 연간판매량, NPV, IRR) ---
                 u_inv_total = u_df['투자비'].sum()
                 u_jeon_total = u_df['총전수'].sum()
                 
@@ -296,7 +299,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "NPV(원)": float(u_npv),
                     "IRR(%)": None if u == '투자보수율가산' else (float(u_irr*100) if u_irr is not None else None)
                 })
-                # -----------------------------------------------------------------------------------------
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
@@ -330,7 +332,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
                 m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
                 
-                # --- [수정] 탭 1 선택 항목 합산 소계표 열 구성 반영 ---
                 t_inv_total = final_filtered_df['투자비'].sum()
                 t_jeon_total = final_filtered_df['총전수'].sum()
                 
@@ -346,7 +347,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "연간판매량(MJ)": "{:,.0f}", 
                     "NPV(원)": "{:,.0f}"
                 }), hide_index=True)
-                # ------------------------------------------------------
 
                 st.divider()
 

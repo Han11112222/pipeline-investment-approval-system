@@ -68,15 +68,6 @@ def get_col_idx(df, keywords, exact=False):
 # [UI] 공통 사이드바 (파일 업로드 및 자동 스캔)
 # --------------------------------------------------------------------------
 with st.sidebar:
-    # --- [수정] 메뉴 네비게이션을 가장 상단으로 이동 ---
-    st.title("메뉴 네비게이션")
-    menu_choice = st.radio(
-        "이동할 페이지를 선택하세요:",
-        ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
-    )
-    st.divider()
-    # ---------------------------------------------------
-
     st.header("📂 데이터 로드 (자동/수동)")
     st.markdown("깃허브에 올린 엑셀 파일을 자동으로 찾아냅니다. (급할 땐 아래에 바로 드래그 업로드 가능)")
     
@@ -107,6 +98,13 @@ with st.sidebar:
         else:
             st.warning("⚠️ 깃허브에서 엑셀 파일을 찾지 못했습니다. 깃허브 동기화를 기다리거나 수동 업로드 하세요.")
             
+    st.divider()
+
+    st.title("메뉴 네비게이션")
+    menu_choice = st.radio(
+        "이동할 페이지를 선택하세요:",
+        ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
+    )
     st.divider()
 
 # ==========================================================================
@@ -360,19 +358,21 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 for _, row in df_detail.iterrows():
                     d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row, row['용도'])
                     
+                    # --- [수정] 탭 1 상세 명세서 열 이름 통일 (총 투자길이 -> 투자길이, 배관투자금액 -> 투자금액) ---
                     detail_results.append({
                         "용도": row['용도'], "구간명": row['구간명'], 
-                        "총 투자길이(m)": d_len, "배관투자금액(원)": row['투자비'],
+                        "투자길이(m)": d_len, "투자금액(원)": row['투자비'],
                         "공급전수(전)": row['총전수'], "연간판매량(MJ)": d_vol, 
                         "NPV(원)": d_npv, "IRR(%)": None if row['용도'] == '투자보수율가산' else (d_irr * 100 if d_irr is not None else None)
                     })
+                    # -----------------------------------------------------------------------------------------
                     
                 if detail_results:
                     sub_row = {
                         "용도": "소계", 
                         "구간명": "", 
-                        "총 투자길이(m)": sum(x["총 투자길이(m)"] for x in detail_results), 
-                        "배관투자금액(원)": sum(x["배관투자금액(원)"] for x in detail_results),
+                        "투자길이(m)": sum(x["투자길이(m)"] for x in detail_results), 
+                        "투자금액(원)": sum(x["투자금액(원)"] for x in detail_results),
                         "공급전수(전)": sum(x["공급전수(전)"] for x in detail_results), 
                         "연간판매량(MJ)": sum(x["연간판매량(MJ)"] for x in detail_results), 
                         "NPV(원)": sum(x["NPV(원)"] for x in detail_results),
@@ -388,7 +388,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     return [''] * len(row)
                 
                 st.dataframe(df_detail_final.style.apply(highlight_subtotal, axis=1).format({
-                    "총 투자길이(m)": "{:,.0f}", "배관투자금액(원)": "{:,.0f}", "공급전수(전)": "{:,.0f}", 
+                    "투자길이(m)": "{:,.0f}", "투자금액(원)": "{:,.0f}", "공급전수(전)": "{:,.0f}", 
                     "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}", 
                     "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
                 }), use_container_width=True, hide_index=True)
@@ -845,10 +845,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             if not detail_df.empty:
                 detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
                 
-                # --- [수정 핵심] 모든 수치가 0인 빈 껍데기(None/0) 행 완벽 삭제 ---
                 detail_df = detail_df[~detail_df['항목'].astype(str).str.lower().str.contains('none|nan|null|^0$|^$', regex=True, na=False)]
                 detail_df = detail_df[(detail_df['규모(m)'] != 0) | (detail_df['투자비(원)'] != 0) | (detail_df['판매량(MJ)'] != 0)]
-                # -------------------------------------------------------------------
                 
                 st.subheader(f"📊 {detail_title_prefix} 용도별 실적 요약")
                 

@@ -430,9 +430,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     extracted = pd.DataFrame()
                     
-                    # --- [수정 핵심] 열 데이터를 모두 구성한 후 마지막에 'None' 등 불필요 행을 일괄 필터링하도록 순서 변경 ---
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
+                    
+                    # --- [수정] 열 데이터 매핑 전 필터링 삭제 (인덱스 어긋남에 의한 'None' 발생 원천 차단) ---
                     
                     if df.shape[1] > 6:
                         extracted['규모(m)'] = df.iloc[:, 5]
@@ -466,19 +467,17 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    # 1. 공사명 기준 필터링
-                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
-                    invalid_names = ['', '0', 'nan', 'None', '구간명', '소계', '합계', '총계', 'ROE제외']
-                    extracted = extracted[~extracted['공사명'].isin(invalid_names)]
-                    extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
-                    
-                    # 2. 항목(A열) 기준 엄격한 필터링 (None, nan, 빈칸 등 완전 차단)
-                    invalid_usages = ['', 'nan', 'none', 'null', '미분류', '용도', '항목']
+                    # --- [수정 핵심] 모든 열 데이터를 구성한 뒤 일괄 강력 필터링 (None 대소문자 무관 차단) ---
+                    invalid_usages = ['nan', 'none', 'null', 'nat', '', '미분류', '용도', '항목']
                     extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
                     
-                    # 3. 중복 제거
+                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
+                    invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
+                    extracted = extracted[~extracted['공사명'].str.lower().isin(invalid_names)]
+                    extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
+                    
                     extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
-                    # ------------------------------------------------------------------------------------------------------
+                    # -----------------------------------------------------------------------------------------
                     
                     def clean_numeric(x):
                         s = str(x).replace(',', '')

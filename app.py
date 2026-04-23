@@ -212,9 +212,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
-            # --- [수정] 구간명에 들어간 '구간명' 헤더 텍스트와 요약행 완벽 차단 ---
             clean_df = clean_df[~clean_df['구간명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]
-            # -------------------------------------------------------------------
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
@@ -284,24 +282,29 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 u_len, u_net_inv, u_vol, u_npv, u_irr, u_irr_msg = get_analysis_result(u_df[num_cols].sum(), u)
                 is_selected = False if '투자보수율가산' in str(u) else True
                 
-                # --- [수정] 투자보수율가산은 IRR을 아예 None으로 처리하여 출력 안 되게 조치 ---
+                # --- [수정] 탭 1 요약표 열 구성 변경 (투자길이, 투자금액, 공급전수, 연간판매량, NPV, IRR) ---
+                u_inv_total = u_df['투자비'].sum()
+                u_jeon_total = u_df['총전수'].sum()
+                
                 usage_results.append({
                     "선택": is_selected,
                     "용도": u,
-                    "총 투자길이(m)": float(u_len),
-                    "총 순투자액(원)": float(u_net_inv),
+                    "투자길이(m)": float(u_len),
+                    "투자금액(원)": float(u_inv_total),
+                    "공급전수(전)": float(u_jeon_total),
                     "연간판매량(MJ)": float(u_vol),
                     "NPV(원)": float(u_npv),
                     "IRR(%)": None if u == '투자보수율가산' else (float(u_irr*100) if u_irr is not None else None)
                 })
-                # ------------------------------------------------------------------------
+                # -----------------------------------------------------------------------------------------
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
             edited_df = st.data_editor(
                 df_usage_summary.style.format({
-                    "총 투자길이(m)": "{:,.0f}",
-                    "총 순투자액(원)": "{:,.0f}",
+                    "투자길이(m)": "{:,.0f}",
+                    "투자금액(원)": "{:,.0f}",
+                    "공급전수(전)": "{:,.0f}",
                     "연간판매량(MJ)": "{:,.0f}",
                     "NPV(원)": "{:,.0f}",
                     "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
@@ -309,7 +312,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 column_config={
                     "선택": st.column_config.CheckboxColumn("선택")
                 },
-                disabled=["용도", "총 투자길이(m)", "총 순투자액(원)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
+                disabled=["용도", "투자길이(m)", "투자금액(원)", "공급전수(전)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
                 hide_index=True,
                 use_container_width=True
             )
@@ -327,17 +330,23 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
                 m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
                 
+                # --- [수정] 탭 1 선택 항목 합산 소계표 열 구성 반영 ---
+                t_inv_total = final_filtered_df['투자비'].sum()
+                t_jeon_total = final_filtered_df['총전수'].sum()
+                
                 subtotal_df = pd.DataFrame([{
                     "항목명": "☑️ 선택 용도 총합계",
-                    "총 투자길이(m)": t_len, "총 순투자액(원)": t_net_inv, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
+                    "투자길이(m)": t_len, "투자금액(원)": t_inv_total, "공급전수(전)": t_jeon_total, "연간판매량(MJ)": t_vol, "NPV(원)": tot_npv
                 }])
                 
                 st.dataframe(subtotal_df.style.format({
-                    "총 투자길이(m)": "{:,.0f}", 
-                    "총 순투자액(원)": "{:,.0f}", 
+                    "투자길이(m)": "{:,.0f}", 
+                    "투자금액(원)": "{:,.0f}", 
+                    "공급전수(전)": "{:,.0f}",
                     "연간판매량(MJ)": "{:,.0f}", 
                     "NPV(원)": "{:,.0f}"
                 }), hide_index=True)
+                # ------------------------------------------------------
 
                 st.divider()
 
@@ -351,14 +360,12 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 for _, row in df_detail.iterrows():
                     d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row, row['용도'])
                     
-                    # --- [수정] 투자보수율가산은 IRR을 None으로 처리 ---
                     detail_results.append({
                         "용도": row['용도'], "구간명": row['구간명'], 
                         "총 투자길이(m)": d_len, "배관투자금액(원)": row['투자비'],
                         "공급전수(전)": row['총전수'], "연간판매량(MJ)": d_vol, 
                         "NPV(원)": d_npv, "IRR(%)": None if row['용도'] == '투자보수율가산' else (d_irr * 100 if d_irr is not None else None)
                     })
-                    # ---------------------------------------------------
                     
                 if detail_results:
                     sub_row = {
@@ -477,7 +484,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     idx_name = get_col_idx(df, ["구간명"], exact=True)
                     
-                    # --- [수정] 탭 2에서도 전수(전)를 정확하게 가져오도록 로직 보완 ---
                     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
                     idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
                     idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
@@ -496,7 +502,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     jeon_apt = get_clean_series(idx_jeon_apt) if idx_jeon_apt is not None else pd.Series(0, index=df.index)
                     jeon_single = get_clean_series(idx_jeon_single) if idx_jeon_single is not None else pd.Series(0, index=df.index)
                     extracted['전수(전)'] = np.maximum(jeon_total, jeon_apt + jeon_single)
-                    # ----------------------------------------------------------------
 
                     extracted['가정용 판매량(MJ)'] = 0
                     extracted['일반용 판매량(MJ)'] = 0
@@ -506,11 +511,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     invalid_usages = ['nan', 'none', 'null', 'nat', '', '미분류', '용도', '항목']
                     extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
+                    extracted = extracted[~extracted['항목'].str.lower().str.contains('none|nan|null|^$', regex=True, na=False)]
                     
-                    # --- [수정] 탭 2에서도 '구간명' 및 쓰레기 문자열 원천 차단 필터 강화 ---
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]
-                    # ------------------------------------------------------------------------
                     
                     extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
                     
@@ -841,11 +845,15 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             if not detail_df.empty:
                 detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
                 
+                # --- [수정 핵심] 모든 수치가 0인 빈 껍데기(None/0) 행 완벽 삭제 ---
+                detail_df = detail_df[~detail_df['항목'].astype(str).str.lower().str.contains('none|nan|null|^0$|^$', regex=True, na=False)]
+                detail_df = detail_df[(detail_df['규모(m)'] != 0) | (detail_df['투자비(원)'] != 0) | (detail_df['판매량(MJ)'] != 0)]
+                # -------------------------------------------------------------------
+                
                 st.subheader(f"📊 {detail_title_prefix} 용도별 실적 요약")
                 
                 usage_counts = detail_df.groupby('항목').size().reset_index(name='건수')
                 
-                # --- [수정] 탭 2 요약표에도 형님께서 원하시는 열 구성(규모, 투자비, 전수, 판매량, NPV, IRR) 적용 ---
                 usage_sums = detail_df.groupby('항목').agg({
                     '규모(m)': 'sum', '투자비(원)': 'sum', '전수(전)': 'sum', 
                     '판매량(MJ)': 'sum', 'NPV(원)': 'sum'
@@ -853,7 +861,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
                 usage_summary = pd.merge(usage_counts, usage_sums, on='항목')
                 
-                # 투자보수율가산 제외한 IRR 평균 계산용 로직
                 valid_irr_df = detail_df[detail_df['항목'] != '투자보수율가산']
                 irr_means = valid_irr_df.groupby('항목')['IRR(%)'].mean().reset_index()
                 usage_summary = pd.merge(usage_summary, irr_means, on='항목', how='left')
@@ -885,7 +892,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
                 }).apply(lambda x: ['background-color: #F5F5F5; font-weight: bold'] * len(x) if x['항목'] == '총계' else [''] * len(x), axis=1), 
                 hide_index=True, use_container_width=True)
-                # --------------------------------------------------------------------------------------------------
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
@@ -898,7 +904,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
                 detail_df.loc[detail_df['항목'] == '투자보수율가산', 'IRR(%)'] = np.nan
                 
-                # --- [수정] 탭 2 상세 내역 표 구성 적용 (항목, 공사명, 규모, 투자비, 전수, 판매량, NPV, IRR) ---
                 display_cols = ['항목', '공사명', '규모(m)', '투자비(원)', '전수(전)', '판매량(MJ)', 'NPV(원)', 'IRR(%)']
                 
                 st.dataframe(detail_df[display_cols].style.format({
@@ -909,7 +914,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     "NPV(원)": "{:,.0f}",
                     "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
                 }), use_container_width=True, hide_index=True)
-                # ---------------------------------------------------------------------------------------------
                 
                 csv_data = detail_df[display_cols].to_csv(index=False).encode('utf-8-sig')
                 st.download_button(

@@ -152,6 +152,10 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     df = pd.read_csv(file_obj, header=None, encoding='utf-8-sig') 
                 else:
                     df = pd.read_excel(file_obj, header=None)
+                    
+                # --- [수정] 데이터 로드 즉시 100행까지만 강제 절삭 (사용자 요청: A1~A100) ---
+                df = df.iloc[:100]
+                # ----------------------------------------------------------------------
 
                 idx_usage = 0 
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
@@ -202,19 +206,18 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             clean_df = pd.concat(clean_df_list, ignore_index=True)
 
             clean_df['구간명'] = clean_df['구간명'].astype(str).str.strip()
+            
             clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
             
-            # --- [수정] 강력 필터링 (용도 및 구간명에 포함된 쓰레기값 원천 차단) ---
-            clean_df['용도_clean'] = clean_df['용도'].str.lower().str.replace(' ', '')
-            clean_df = clean_df[~clean_df['용도_clean'].str.contains('none|nan|null|nat|^$', regex=True, na=False)]
-            clean_df = clean_df[~clean_df['용도'].isin(['미분류', '용도', '항목'])]
-            clean_df = clean_df.drop(columns=['용도_clean'])
+            # --- [수정] 확실한 화이트리스트 필터링 (100% 차단 보장) ---
+            valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
+            clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
-            clean_df['구간명_clean'] = clean_df['구간명'].str.lower().str.replace(' ', '')
-            clean_df = clean_df[~clean_df['구간명_clean'].str.contains('none|nan|null|^0$|^$|구간명|소계|합계|총계|roe제외|제외', regex=True, na=False)]
-            clean_df = clean_df.drop(columns=['구간명_clean'])
-            # ----------------------------------------------------------------------
+            invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
+            clean_df = clean_df[~clean_df['구간명'].str.lower().isin(invalid_names)]
+            clean_df = clean_df[~clean_df['구간명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
+            # --------------------------------------------------------
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
@@ -435,9 +438,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     else:
                         df = pd.read_excel(file_obj, header=None)
 
+                    # --- [수정] 데이터 로드 즉시 100행까지만 강제 절삭 (사용자 요청: A1~A100) ---
+                    df = df.iloc[:100]
+                    # ----------------------------------------------------------------------
+
                     extracted = pd.DataFrame()
-                    
-                    # --- [수정 핵심] 열 데이터를 모두 먼저 구성한 후, 마지막에 필터링을 적용하여 인덱스 꼬임 및 None 발생 차단 ---
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
                     
@@ -473,22 +478,17 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
-
-                    # 1. 항목(A열) 기준 1차 강력 필터: none, nan, 빈칸, 요약행을 무조건 날려버림
-                    extracted['항목_clean'] = extracted['항목'].str.lower().str.replace(' ', '')
-                    extracted = extracted[~extracted['항목_clean'].str.contains('none|nan|null|nat|^$', regex=True, na=False)]
-                    extracted = extracted[~extracted['항목'].isin(['미분류', '용도', '항목'])]
-                    extracted = extracted.drop(columns=['항목_clean'])
-
-                    # 2. 공사명 기준 2차 강력 필터: 'ROE제외', '합계' 등 사용자 메모행 완벽 차단
-                    extracted['공사명_clean'] = extracted['공사명'].str.lower().str.replace(' ', '')
-                    extracted = extracted[~extracted['공사명_clean'].str.contains('none|nan|null|^0$|^$|구간명|소계|합계|총계|roe제외|제외', regex=True, na=False)]
-                    extracted = extracted.drop(columns=['공사명_clean'])
+                    # --- [수정] 확실한 화이트리스트 필터링 적용 ('none', 요약행 100% 차단) ---
+                    valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
+                    extracted = extracted[extracted['항목'].isin(valid_usages)]
                     
-                    # 3. 중복 제거 (최종 최신 데이터만 유지)
+                    extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
+                    invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
+                    extracted = extracted[~extracted['공사명'].str.lower().isin(invalid_names)]
+                    extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
+                    # -----------------------------------------------------------------------
+                    
                     extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
-                    # --------------------------------------------------------------------------------------------------------
                     
                     def clean_numeric(x):
                         s = str(x).replace(',', '')

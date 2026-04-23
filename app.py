@@ -152,10 +152,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     df = pd.read_csv(file_obj, header=None, encoding='utf-8-sig') 
                 else:
                     df = pd.read_excel(file_obj, header=None)
-                    
-                # --- [수정] 데이터 로드 즉시 100행까지만 강제 절삭 (사용자 요청: A1~A100) ---
+
                 df = df.iloc[:100]
-                # ----------------------------------------------------------------------
 
                 idx_usage = 0 
                 idx_name = get_col_idx(df, ["구간명"], exact=True)
@@ -209,15 +207,16 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             
             clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
+            # --- [수정] 원본의 '연료전지'를 '연료전지용'으로 치환하여 필터링 누락 방지 ---
+            clean_df['용도'] = clean_df['용도'].replace('연료전지', '연료전지용')
+            # --------------------------------------------------------------------------
             
-            # --- [수정] 확실한 화이트리스트 필터링 (100% 차단 보장) ---
             valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
             invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
             clean_df = clean_df[~clean_df['구간명'].str.lower().isin(invalid_names)]
             clean_df = clean_df[~clean_df['구간명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
-            # --------------------------------------------------------
 
             clean_df = clean_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
 
@@ -353,14 +352,17 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 detail_results = []
                 for _, row in df_detail.iterrows():
                     d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row, row['용도'])
+                    # --- [수정] 배관투자금액(원) 항목을 딕셔너리에 추가 ---
                     detail_results.append({
-                        "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len,
+                        "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len, "배관투자금액(원)": row['투자비'],
                         "공급전수(전)": row['총전수'], "기본요금수익(원)": row['기본요금수익'], 
                         "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
                     })
+                    # --------------------------------------------------------
                     
+                # --- [수정] 스타일 포맷에 배관투자금액(원) 반영 ---
                 st.dataframe(pd.DataFrame(detail_results).style.format({
-                    "투자길이(m)": "{:,.0f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
+                    "투자길이(m)": "{:,.0f}", "배관투자금액(원)": "{:,.0f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
                     "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
                 }), use_container_width=True, hide_index=True)
     else:
@@ -438,13 +440,15 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     else:
                         df = pd.read_excel(file_obj, header=None)
 
-                    # --- [수정] 데이터 로드 즉시 100행까지만 강제 절삭 (사용자 요청: A1~A100) ---
                     df = df.iloc[:100]
-                    # ----------------------------------------------------------------------
 
                     extracted = pd.DataFrame()
+                    
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
+                    # --- [수정] 탭 2 추출 시에도 원본의 '연료전지'를 '연료전지용'으로 치환 ---
+                    extracted['항목'] = extracted['항목'].replace('연료전지', '연료전지용')
+                    # --------------------------------------------------------------------------
                     
                     if df.shape[1] > 6:
                         extracted['규모(m)'] = df.iloc[:, 5]
@@ -478,15 +482,13 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    # --- [수정] 확실한 화이트리스트 필터링 적용 ('none', 요약행 100% 차단) ---
-                    valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
-                    extracted = extracted[extracted['항목'].isin(valid_usages)]
+                    invalid_usages = ['nan', 'none', 'null', 'nat', '', '미분류', '용도', '항목']
+                    extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
                     
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
                     extracted = extracted[~extracted['공사명'].str.lower().isin(invalid_names)]
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
-                    # -----------------------------------------------------------------------
                     
                     extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
                     

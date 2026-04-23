@@ -207,9 +207,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             
             clean_df['용도'] = clean_df['용도'].astype(str).str.strip()
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
-            # --- [수정] 원본의 '연료전지'를 '연료전지용'으로 치환하여 필터링 누락 방지 ---
             clean_df['용도'] = clean_df['용도'].replace('연료전지', '연료전지용')
-            # --------------------------------------------------------------------------
             
             valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
@@ -352,19 +350,40 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 detail_results = []
                 for _, row in df_detail.iterrows():
                     d_len, d_net_inv, d_vol, d_npv, d_irr, d_irr_msg = get_analysis_result(row, row['용도'])
-                    # --- [수정] 배관투자금액(원) 항목을 딕셔너리에 추가 ---
                     detail_results.append({
                         "용도": row['용도'], "구간명": row['구간명'], "투자길이(m)": d_len, "배관투자금액(원)": row['투자비'],
                         "공급전수(전)": row['총전수'], "기본요금수익(원)": row['기본요금수익'], 
                         "순투자액(원)": d_net_inv, "연간판매량(MJ)": d_vol, "NPV(원)": d_npv
                     })
-                    # --------------------------------------------------------
                     
-                # --- [수정] 스타일 포맷에 배관투자금액(원) 반영 ---
-                st.dataframe(pd.DataFrame(detail_results).style.format({
+                # --- [핵심 추가] 소계 행 추가 로직 ---
+                if detail_results:
+                    sub_row = {
+                        "용도": "소계", 
+                        "구간명": "", 
+                        "투자길이(m)": sum(x["투자길이(m)"] for x in detail_results), 
+                        "배관투자금액(원)": sum(x["배관투자금액(원)"] for x in detail_results),
+                        "공급전수(전)": sum(x["공급전수(전)"] for x in detail_results), 
+                        "기본요금수익(원)": sum(x["기본요금수익(원)"] for x in detail_results), 
+                        "순투자액(원)": sum(x["순투자액(원)"] for x in detail_results), 
+                        "연간판매량(MJ)": sum(x["연간판매량(MJ)"] for x in detail_results), 
+                        "NPV(원)": sum(x["NPV(원)"] for x in detail_results)
+                    }
+                    detail_results.append(sub_row)
+                    
+                df_detail_final = pd.DataFrame(detail_results)
+                
+                # --- [핵심 추가] 소계 행 회색 하이라이트 스타일링 함수 ---
+                def highlight_subtotal(row):
+                    if row['용도'] == '소계':
+                        return ['background-color: #E0E0E0; font-weight: bold'] * len(row)
+                    return [''] * len(row)
+                
+                st.dataframe(df_detail_final.style.apply(highlight_subtotal, axis=1).format({
                     "투자길이(m)": "{:,.0f}", "배관투자금액(원)": "{:,.0f}", "공급전수(전)": "{:,.0f}", "기본요금수익(원)": "{:,.0f}",
                     "순투자액(원)": "{:,.0f}", "연간판매량(MJ)": "{:,.0f}", "NPV(원)": "{:,.0f}"
                 }), use_container_width=True, hide_index=True)
+                # -----------------------------------------------------------
     else:
         st.info("👆 좌측 사이드바에 파일이 로드되지 않았습니다. 깃허브에 파일을 올리거나 직접 업로드 해주세요.")
 
@@ -446,9 +465,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     
                     extracted['항목'] = df.iloc[:, 0].astype(str).str.strip()
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
-                    # --- [수정] 탭 2 추출 시에도 원본의 '연료전지'를 '연료전지용'으로 치환 ---
                     extracted['항목'] = extracted['항목'].replace('연료전지', '연료전지용')
-                    # --------------------------------------------------------------------------
                     
                     if df.shape[1] > 6:
                         extracted['규모(m)'] = df.iloc[:, 5]
@@ -484,6 +501,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 
                     invalid_usages = ['nan', 'none', 'null', 'nat', '', '미분류', '용도', '항목']
                     extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
+                    # --- [수정 핵심] 추출 단계에서 None 찌꺼기 문자열 원천 차단 필터 적용 ---
+                    extracted = extracted[~extracted['항목'].str.lower().str.contains('none|nan|null|^$', regex=True, na=False)]
                     
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
@@ -818,6 +837,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 
             if not detail_df.empty:
                 detail_title_prefix = f"{selected_cha_t2}차 당해" if view_mode_t2 == "1. 당해차수 데이터" else f"{selected_cha_t2}차 누계"
+                
+                # --- [수정 핵심] 화면에 표출되기 직전에 한 번 더 None 찌꺼기 행 완벽 삭제 ---
+                detail_df = detail_df[~detail_df['항목'].astype(str).str.lower().str.contains('none|nan|null|^$', regex=True, na=False)]
+                # -------------------------------------------------------------------------------
                 
                 st.subheader(f"📊 {detail_title_prefix} 용도별 실적 요약")
                 

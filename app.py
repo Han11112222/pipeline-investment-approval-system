@@ -509,9 +509,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    invalid_usages = ['nan', 'none', 'null', 'nat', '', '미분류', '용도', '항목']
-                    extracted = extracted[~extracted['항목'].str.lower().isin(invalid_usages)]
-                    extracted = extracted[~extracted['항목'].str.lower().str.contains('none|nan|null|^$', regex=True, na=False)]
+                    # --- [수정된 부분] A열의 명확한 용도명만 남기도록 명시적 화이트리스트 필터링 적용 ---
+                    # E열에 기재된 소계/합계 데이터나, 빈 값이 None/nan으로 인식되어 딸려오는 현상을 원천 차단합니다.
+                    valid_target_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
+                    extracted = extracted[extracted['항목'].isin(valid_target_usages)]
+                    # ---------------------------------------------------------------------------------
                     
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]

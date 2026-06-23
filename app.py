@@ -68,14 +68,12 @@ def get_col_idx(df, keywords, exact=False):
 # [UI] 공통 사이드바 (파일 업로드 및 자동 스캔)
 # --------------------------------------------------------------------------
 with st.sidebar:
-    # --- [수정 완벽 반영] 메뉴 네비게이션 가장 상단 배치 ---
     st.title("메뉴 네비게이션")
     menu_choice = st.radio(
         "이동할 페이지를 선택하세요:",
         ('1. 배관 투자 경제성 결재 대시보드', '2. 배관 투자 승인 내역')
     )
     st.divider()
-    # ---------------------------------------------------------
 
     st.header("📂 데이터 로드 (자동/수동)")
     st.markdown("깃허브에 올린 엑셀 파일을 자동으로 찾아냅니다. (급할 땐 아래에 바로 드래그 업로드 가능)")
@@ -211,7 +209,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
             clean_df['용도'] = clean_df['용도'].replace('연료전지', '연료전지용')
             
-            # [수정] 주택용 추가
             valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
@@ -263,7 +260,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
                 )
                 
-                if '공공택지' in str(usage_val):
+                # --- [수정 완벽 반영] 공공택지와 주택용은 기초자료(원본) NPV/IRR 데이터를 그대로 적용 ---
+                if '공공택지' in str(usage_val) or '주택용' in str(usage_val):
                     npv = row['원본_NPV']
                     irr = (row['원본_IRR'] / 100.0) if row['원본_IRR'] != 0 else 0
                     irr_msg = ""
@@ -276,7 +274,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
             
-            # [수정] 주택용 추가
             custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
             
@@ -511,10 +508,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    # --- [수정된 부분] 주택용 추가 ---
                     valid_target_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"]
                     extracted = extracted[extracted['항목'].isin(valid_target_usages)]
-                    # ---------------------------------------------------------------------------------
                     
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]
@@ -562,7 +557,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
         st.subheader("🔹 1. 수요개발배관 (실적 자동 추출)")
-        # [수정] 주택용 추가 및 기본값 설정
         df_sd_base = pd.DataFrame({
             "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"],
             "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 0, 3004], 
@@ -866,7 +860,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 irr_means = valid_irr_df.groupby('항목')['IRR(%)'].mean().reset_index()
                 usage_summary = pd.merge(usage_summary, irr_means, on='항목', how='left')
                 
-                # [수정] 주택용 추가
                 custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
                 usage_summary['용도_순위'] = usage_summary['항목'].apply(lambda x: 9999 if x == '투자보수율가산' else (custom_order.index(x) if x in custom_order else 999))
                 usage_summary = usage_summary.sort_values(by=['용도_순위']).drop(columns=['용도_순위'])

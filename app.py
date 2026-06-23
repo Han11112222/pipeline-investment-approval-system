@@ -18,14 +18,12 @@ st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline A
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
 
-# [핵심 보완] 엑셀의 사사오입(Round Half Up)과 100% 동일하게 작동하는 반올림 함수
 def excel_round(val):
     return math.floor(val + 0.5) if val > 0 else math.ceil(val - 0.5)
 
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    # 엑셀과 동일한 단수(원 단위) 처리 적용으로 10원 오차 완벽 해결
     net_inv = excel_round(sim_inv - sim_contrib - sim_other)
     margin_total = excel_round((sim_rev - sim_cost) + sim_basic_rev)
     
@@ -266,7 +264,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
                 )
                 
-                if '공공택지' in str(usage_val) or '주택용' in str(usage_val):
+                # [수정 완벽 반영] 영업용 원본 데이터 강제 추출 조건 추가
+                if '공공택지' in str(usage_val) or '주택용' in str(usage_val) or '영업용' in str(usage_val):
                     npv = row['원본_NPV']
                     irr = (row['원본_IRR'] / 100.0) if row['원본_IRR'] != 0 else 0
                     irr_msg = ""
@@ -648,9 +647,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
             
-            # [핵심 보완] 동일 차수에 중복된 파일(Excel, CSV)이 동시 업로드되어 더블 카운팅되는 현상 원천 차단
             all_parsed_df = all_parsed_df.drop_duplicates(subset=['차수', '항목', '공사명'], keep='last')
-            
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
             prev_df = all_parsed_df[all_parsed_df['차수'] < selected_cha_t2]
@@ -670,16 +667,18 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             for i in range(len(df_base)):
                 item_raw = df_base.at[i, '항목']
                 if item_raw == '소계': continue
+                
+                # [수정 완벽 반영] 부분 일치(in) 오류 제거 -> 완전 일치(==) 로직으로 더블 카운팅 해결
                 item_clean = str(item_raw).replace('\n', '').replace(' ', '')
                 
                 if not prev_agg.empty:
-                    matched_idx = [idx for idx in prev_agg.index if item_clean in str(idx) or str(idx) in item_clean]
+                    matched_idx = [idx for idx in prev_agg.index if item_clean == str(idx)]
                     if matched_idx:
                         df_base.at[i, '기승인_규모'] = prev_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '기승인_금액'] = prev_agg.loc[matched_idx, '투자비(원)'].sum()
                 
                 if not curr_agg.empty:
-                    matched_idx = [idx for idx in curr_agg.index if item_clean in str(idx) or str(idx) in item_clean]
+                    matched_idx = [idx for idx in curr_agg.index if item_clean == str(idx)]
                     if matched_idx:
                         df_base.at[i, '금회_규모'] = curr_agg.loc[matched_idx, '규모(m)'].sum()
                         df_base.at[i, '금회_금액'] = curr_agg.loc[matched_idx, '투자비(원)'].sum()

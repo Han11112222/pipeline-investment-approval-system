@@ -5,6 +5,7 @@ import numpy_financial as npf
 import re
 import plotly.express as px
 import os
+import math
 
 # --------------------------------------------------------------------------
 # [설정] 페이지 기본
@@ -17,18 +18,22 @@ st.set_page_config(page_title="공식 배관 투자 결재 시스템 (Pipeline A
 def manual_npv(rate, values):
     return sum(v / ((1 + rate) ** i) for i, v in enumerate(values))
 
+# [핵심 보완] 엑셀의 사사오입(Round Half Up)과 100% 동일하게 작동하는 반올림 함수
+def excel_round(val):
+    return math.floor(val + 0.5) if val > 0 else math.ceil(val - 0.5)
+
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    # [수정] 전산 시스템 소수점 절사(단수) 처리 방식 동기화
-    net_inv = round(sim_inv - sim_contrib - sim_other)
-    margin_total = round((sim_rev - sim_cost) + sim_basic_rev)
+    # 엑셀과 동일한 단수(원 단위) 처리 적용으로 10원 오차 완벽 해결
+    net_inv = excel_round(sim_inv - sim_contrib - sim_other)
+    margin_total = excel_round((sim_rev - sim_cost) + sim_basic_rev)
     
-    cost_sga = round((sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon))
-    annual_depreciation = round(sim_inv / dep_period) if dep_period > 0 else 0
+    cost_sga = excel_round((sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon))
+    annual_depreciation = excel_round(sim_inv / dep_period) if dep_period > 0 else 0
     
     ebit = margin_total - cost_sga - annual_depreciation
-    net_income = round(ebit * (1 - tax)) 
+    net_income = excel_round(ebit * (1 - tax)) 
     fixed_ocf = net_income + annual_depreciation
     
     flows = [-net_inv]
@@ -474,7 +479,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
                     extracted['항목'] = extracted['항목'].replace('연료전지', '연료전지용')
                     
-                    # [수정] 2번 탭 데이터 추출 방식 동적 할당으로 보완 (하드코딩 제거)
                     idx_name = get_col_idx(df, ["구간명"], exact=True)
                     idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
                     idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
@@ -510,8 +514,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     
                     extracted['공사명'] = extracted['공사명'].astype(str).str.strip()
                     extracted = extracted[~extracted['공사명'].str.contains('합계|소계|총계|roe|제외|구간명', case=False, na=False, regex=True)]
-                    
-                    extracted = extracted.drop_duplicates(subset=['차수', '공사명'], keep='last')
                     
                     def clean_numeric(x):
                         s = str(x).replace(',', '')
@@ -645,6 +647,10 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     if working_files:
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
+            
+            # [핵심 보완] 동일 차수에 중복된 파일(Excel, CSV)이 동시 업로드되어 더블 카운팅되는 현상 원천 차단
+            all_parsed_df = all_parsed_df.drop_duplicates(subset=['차수', '항목', '공사명'], keep='last')
+            
             all_parsed_df['항목_clean'] = all_parsed_df['항목'].astype(str).str.replace(r'\s+', '', regex=True)
             
             prev_df = all_parsed_df[all_parsed_df['차수'] < selected_cha_t2]

@@ -211,7 +211,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             clean_df['용도'] = clean_df['용도'].replace('ROE', '투자보수율가산')
             clean_df['용도'] = clean_df['용도'].replace('연료전지', '연료전지용')
             
-            valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
+            # [수정] 주택용 추가
+            valid_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"]
             clean_df = clean_df[clean_df['용도'].isin(valid_usages)]
             
             invalid_names = ['', '0', 'nan', 'none', 'null', '구간명', '소계', '합계', '총계', 'roe제외']
@@ -275,7 +276,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
             st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
             
-            custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용"]
+            # [수정] 주택용 추가
+            custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
             
             sorted_usages = sorted(unique_usages, key=lambda x: 9999 if x == '투자보수율가산' else (custom_order.index(x) if x in custom_order else 999))
@@ -509,9 +511,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['NPV(원)'] = get_clean_series(idx_npv) if idx_npv is not None else 0
                     extracted['IRR(%)'] = get_clean_series(idx_irr) if idx_irr is not None else 0
 
-                    # --- [수정된 부분] A열의 명확한 용도명만 남기도록 명시적 화이트리스트 필터링 적용 ---
-                    # E열에 기재된 소계/합계 데이터나, 빈 값이 None/nan으로 인식되어 딸려오는 현상을 원천 차단합니다.
-                    valid_target_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"]
+                    # --- [수정된 부분] 주택용 추가 ---
+                    valid_target_usages = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"]
                     extracted = extracted[extracted['항목'].isin(valid_target_usages)]
                     # ---------------------------------------------------------------------------------
                     
@@ -561,16 +562,16 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
         st.subheader("🔹 1. 수요개발배관 (실적 자동 추출)")
+        # [수정] 주택용 추가 및 기본값 설정
         df_sd_base = pd.DataFrame({
-            "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용(지자체)", "투자보수율가산"],
-            "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 3004], 
-            "한도_금액": [1055430560, 851196752, 287568274, 439429508, 182956113, 610435480, 0, 1695844012]  
+            "항목": ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)", "투자보수율가산"],
+            "한도_규모": [1556, 906, 325, 498, 275, 735, 0, 0, 3004], 
+            "한도_금액": [1055430560, 851196752, 287568274, 439429508, 182956113, 610435480, 0, 0, 1695844012]  
         })
         edited_sd = st.data_editor(df_sd_base, key="sd_editor", hide_index=True, use_container_width=True)
         
         st.divider()
 
-        # [신규 추가] 스마트 자동 이월(Carry-over) 로직
         available_bp_chas = [c for c in extracted_bp_data_by_cha.keys() if c <= selected_cha_t2]
         if available_bp_chas:
             latest_bp_cha = max(available_bp_chas)
@@ -865,7 +866,8 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 irr_means = valid_irr_df.groupby('항목')['IRR(%)'].mean().reset_index()
                 usage_summary = pd.merge(usage_summary, irr_means, on='항목', how='left')
                 
-                custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용"]
+                # [수정] 주택용 추가
+                custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
                 usage_summary['용도_순위'] = usage_summary['항목'].apply(lambda x: 9999 if x == '투자보수율가산' else (custom_order.index(x) if x in custom_order else 999))
                 usage_summary = usage_summary.sort_values(by=['용도_순위']).drop(columns=['용도_순위'])
                 

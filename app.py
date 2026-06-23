@@ -20,14 +20,15 @@ def manual_npv(rate, values):
 def calculate_simulation(sim_len, sim_inv, sim_contrib, sim_other, sim_vol, sim_rev, sim_cost, 
                          sim_jeon, sim_basic_rev, rate, tax, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m):
     
-    net_inv = sim_inv - sim_contrib - sim_other
-    margin_total = (sim_rev - sim_cost) + sim_basic_rev 
+    # [수정] 전산 시스템 소수점 절사(단수) 처리 방식 동기화
+    net_inv = round(sim_inv - sim_contrib - sim_other)
+    margin_total = round((sim_rev - sim_cost) + sim_basic_rev)
     
-    cost_sga = (sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon)
-    annual_depreciation = sim_inv / dep_period if dep_period > 0 else 0
+    cost_sga = round((sim_len * c_maint) + (sim_len * c_adm_m) + (sim_jeon * c_adm_jeon))
+    annual_depreciation = round(sim_inv / dep_period) if dep_period > 0 else 0
     
     ebit = margin_total - cost_sga - annual_depreciation
-    net_income = ebit * (1 - tax) 
+    net_income = round(ebit * (1 - tax)) 
     fixed_ocf = net_income + annual_depreciation
     
     flows = [-net_inv]
@@ -260,7 +261,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
                 )
                 
-                # --- [수정 완벽 반영] 공공택지와 주택용은 기초자료(원본) NPV/IRR 데이터를 그대로 적용 ---
                 if '공공택지' in str(usage_val) or '주택용' in str(usage_val):
                     npv = row['원본_NPV']
                     irr = (row['원본_IRR'] / 100.0) if row['원본_IRR'] != 0 else 0
@@ -474,19 +474,13 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     extracted['항목'] = extracted['항목'].replace('ROE', '투자보수율가산')
                     extracted['항목'] = extracted['항목'].replace('연료전지', '연료전지용')
                     
-                    if df.shape[1] > 6:
-                        extracted['규모(m)'] = df.iloc[:, 5]
-                        extracted['투자비(원)'] = df.iloc[:, 6]
-                    else:
-                        extracted['규모(m)'] = 0
-                        extracted['투자비(원)'] = 0
-
+                    # [수정] 2번 탭 데이터 추출 방식 동적 할당으로 보완 (하드코딩 제거)
                     idx_name = get_col_idx(df, ["구간명"], exact=True)
-                    
+                    idx_len = get_col_idx(df, ["길이(m)", "배관길이"], exact=False)
+                    idx_inv = get_col_idx(df, ["배관투자금액", "총공사비"], exact=False)
                     idx_jeon = get_col_idx(df, ["수요전수계", "총전수"], exact=False)
                     idx_jeon_apt = get_col_idx(df, ["공동주택전수"], exact=False)
                     idx_jeon_single = get_col_idx(df, ["단독주택전수"], exact=False)
-                    
                     idx_total_vol = get_col_idx(df, ["계(MJ)"], exact=False)
                     idx_npv = get_col_idx(df, ["NPV"], exact=False)
                     idx_irr = get_col_idx(df, ["IRR"], exact=False)
@@ -494,6 +488,9 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     def get_clean_series(c_idx):
                         return pd.to_numeric(df.iloc[:, c_idx].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
 
+                    extracted['규모(m)'] = get_clean_series(idx_len) if idx_len is not None else 0
+                    extracted['투자비(원)'] = get_clean_series(idx_inv) if idx_inv is not None else 0
+                    
                     extracted['공사명'] = df.iloc[:, idx_name] if idx_name is not None else df.iloc[:, 1]
                     extracted['차수'] = file_cha
                     

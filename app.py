@@ -97,6 +97,8 @@ with st.sidebar:
             
             for f in files:
                 if f.endswith(('.csv', '.xlsx', '.xls')) and not f.startswith('~'):
+                    if '승인내역' in f:
+                        continue
                     if '기초자료' in f or '현황' in f or '투자' in f:
                         scanned_files.append(os.path.join(root, f))
         
@@ -143,7 +145,8 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             try:
                 file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
                 
-                if '현황' in file_name or '투자' in file_name and '기초자료' not in file_name:
+                # 현황정리 파일 또는 승인내역 파일은 탭1에서 제외
+                if '현황' in file_name or '승인내역' in file_name or ('투자' in file_name and '기초자료' not in file_name):
                     continue
                     
                 if hasattr(file_obj, 'seek'):
@@ -427,8 +430,12 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 file_cha = int(match.group(1)) if match else 1
                 chas.append(file_cha)
                 
+                # 승인내역 파일은 탭2에서도 제외 (저장용 파일)
+                if '승인내역' in file_name:
+                    continue
+                
                 # A. 공무팀 현황정리 파일
-                if '현황' in file_name or '투자' in file_name and '기초자료' not in file_name:
+                if '현황' in file_name or ('투자' in file_name and '기초자료' not in file_name):
                     if file_name.endswith('.csv'):
                         df_status = pd.read_csv(file_obj, header=None, encoding='utf-8-sig')
                     else:

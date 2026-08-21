@@ -120,15 +120,15 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         st.header("⚙️ 분석 변수 설정")
         st.info("💡 전산 시스템의 NPV와 일치하도록 아래 단가와 세율을 시스템 세팅값과 동일하게 맞춰주세요.")
         
-        rate_pct = st.number_input("할인율 (%)", value=6.15, step=0.01, format="%.2f")
+        rate_pct = st.number_input("할인율 (%)", value=5.86, step=0.01, format="%.2f")
         tax_pct = st.number_input("법인세율+주민세율 (%)", value=22.0, step=0.1, format="%.1f")
         dep_period = st.number_input("감가상각 연수 (년)", value=30, step=1)
         analysis_period = st.number_input("경제성 분석 연수 (년)", value=30, step=1)
         
         st.subheader("💰 비용 단가")
-        c_maint = st.number_input("유지비 (원/m)", value=8222, format="%d")
-        c_adm_jeon = st.number_input("관리비 (원/전)", value=6209, format="%d")
-        c_adm_m = st.number_input("관리비 (원/m)", value=13605, format="%d")
+        c_maint = st.number_input("유지비 (원/m)", value=8337, format="%d")
+        c_adm_m = st.number_input("관리비 (원/m)", value=11870, format="%d")
+        c_adm_jeon = st.number_input("관리비 (원/전)", value=17357, format="%d")
         sim_basic_price = st.number_input("주택용 월 기본요금 단가 (원)", value=900, step=10, format="%d")
 
         RATE = rate_pct / 100
@@ -264,7 +264,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     row['총전수'], row['기본요금수익'], RATE, TAX, dep_period, analysis_period, c_maint, c_adm_jeon, c_adm_m
                 )
                 
-                # [수정 완벽 반영] 영업용 원본 데이터 강제 추출 조건 추가
                 if '공공택지' in str(usage_val) or '주택용' in str(usage_val) or '영업용' in str(usage_val):
                     npv = row['원본_NPV']
                     irr = (row['원본_IRR'] / 100.0) if row['원본_IRR'] != 0 else 0
@@ -668,7 +667,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 item_raw = df_base.at[i, '항목']
                 if item_raw == '소계': continue
                 
-                # [수정 완벽 반영] 부분 일치(in) 오류 제거 -> 완전 일치(==) 로직으로 더블 카운팅 해결
                 item_clean = str(item_raw).replace('\n', '').replace(' ', '')
                 
                 if not prev_agg.empty:

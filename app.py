@@ -128,10 +128,10 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         analysis_period = st.number_input("경제성 분석 연수 (년)", value=30, step=1)
         
         st.subheader("💰 비용 단가")
-        c_maint = st.number_input("유지비 (원/m)", value=8337, format="%d")
-        c_adm_m = st.number_input("관리비 (원/m)", value=11870, format="%d")
-        c_adm_jeon = st.number_input("관리비 (원/전)", value=17357, format="%d")
-        sim_basic_price = st.number_input("주택용 월 기본요금 단가 (원)", value=900, step=10, format="%d")
+        c_maint = st.number_input("유지비 (원/m)", value=8337, format="%d", key="input_c_maint")
+        c_adm_jeon = st.number_input("관리비 (원/전)", value=17357, format="%d", key="input_c_adm_jeon")
+        c_adm_m = st.number_input("관리비 (원/m)", value=11870, format="%d", key="input_c_adm_m")
+        sim_basic_price = st.number_input("주택용 월 기본요금 단가 (원)", value=900, step=10, format="%d", key="input_sim_basic_price")
 
         RATE = rate_pct / 100
         TAX = tax_pct / 100

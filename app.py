@@ -278,8 +278,11 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     
                 return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
 
-            st.subheader("1. 📁 용도별 경제성 요약 (분석 대상 선택)")
-            
+            # ------------------------------------------------------------------
+            # ★ 순서 변경: data_editor는 내부적으로 먼저 계산하되,
+            #   화면 렌더링은 "소계 → 용도별 요약" 순으로 표시
+            # ------------------------------------------------------------------
+
             custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
             
@@ -307,6 +310,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
+            # ★ data_editor: 화면에는 아래(2번)에 표시되지만 selected_usages 계산을 위해 먼저 호출
             edited_df = st.data_editor(
                 df_usage_summary.style.format({
                     "투자길이(m)": "{:,.0f}",
@@ -321,18 +325,20 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 },
                 disabled=["용도", "투자길이(m)", "투자금액(원)", "공급전수(전)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
+                key="usage_editor_hidden"
             )
 
             selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
 
+            # ★ [1번] 선택 항목 합산 소계를 먼저 렌더링
             if selected_usages:
                 final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
                 t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum(), '합산')
                 
                 tot_npv = sum(item["NPV(원)"] for item in usage_results if item["용도"] in selected_usages)
 
-                st.subheader("2. 📊 선택 항목 합산 소계 (Subtotal)")
+                st.subheader("1. 📊 선택 항목 합산 소계 (Subtotal)")
                 m1, m2 = st.columns(2)
                 m1.metric("최종 합산 NPV", f"{tot_npv:,.0f} 원")
                 m2.metric("최종 합산 IRR", f"{tot_irr*100:.2f} %" if tot_irr is not None else tot_irr_msg)
@@ -353,6 +359,25 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "NPV(원)": "{:,.0f}"
                 }), hide_index=True)
 
+                st.divider()
+
+            # ★ [2번] 용도별 경제성 요약 표를 그 다음에 렌더링
+            st.subheader("2. 📁 용도별 경제성 요약 (분석 대상 선택)")
+            st.dataframe(
+                df_usage_summary.style.format({
+                    "투자길이(m)": "{:,.0f}",
+                    "투자금액(원)": "{:,.0f}",
+                    "공급전수(전)": "{:,.0f}",
+                    "연간판매량(MJ)": "{:,.0f}",
+                    "NPV(원)": "{:,.0f}",
+                    "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
+                }),
+                hide_index=True,
+                use_container_width=True
+            )
+            st.caption("💡 분석에서 제외할 용도는 위 숨겨진 편집 표(페이지 상단)에서 체크를 해제하세요.")
+
+            if selected_usages:
                 st.divider()
 
                 st.subheader("3. 📑 구간별 경제성 상세 명세서")

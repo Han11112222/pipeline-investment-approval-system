@@ -278,11 +278,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     
                 return row['길이'], row['투자비'] - row['분담금'] - row['기타이익'], row['판매량'], npv, irr, irr_msg
 
-            # ------------------------------------------------------------------
-            # ★ 순서 변경: data_editor는 내부적으로 먼저 계산하되,
-            #   화면 렌더링은 "소계 → 용도별 요약" 순으로 표시
-            # ------------------------------------------------------------------
-
             custom_order = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용"]
             unique_usages = filtered_clean_df['용도'].unique().tolist()
             
@@ -310,26 +305,18 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 
             df_usage_summary = pd.DataFrame(usage_results)
 
-            # ★ data_editor: 화면에는 아래(2번)에 표시되지만 selected_usages 계산을 위해 먼저 호출
-            edited_df = st.data_editor(
-                df_usage_summary.style.format({
-                    "투자길이(m)": "{:,.0f}",
-                    "투자금액(원)": "{:,.0f}",
-                    "공급전수(전)": "{:,.0f}",
-                    "연간판매량(MJ)": "{:,.0f}",
-                    "NPV(원)": "{:,.0f}",
-                    "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
-                }),
-                column_config={
-                    "선택": st.column_config.CheckboxColumn("선택")
-                },
-                disabled=["용도", "투자길이(m)", "투자금액(원)", "공급전수(전)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
-                hide_index=True,
-                use_container_width=True,
-                key="usage_editor_hidden"
-            )
+            # session_state로 선택 상태 관리 (초기값 설정)
+            ss_key = "usage_selection"
+            if ss_key not in st.session_state:
+                st.session_state[ss_key] = {row["용도"]: row["선택"] for row in usage_results}
+            else:
+                # 새 용도가 생기면 기본값 추가
+                for row in usage_results:
+                    if row["용도"] not in st.session_state[ss_key]:
+                        st.session_state[ss_key][row["용도"]] = row["선택"]
 
-            selected_usages = edited_df[edited_df['선택'] == True]['용도'].tolist()
+            # session_state 기준으로 선택된 용도 결정
+            selected_usages = [row["용도"] for row in usage_results if st.session_state[ss_key].get(row["용도"], row["선택"])]
 
             # ★ [1번] 선택 항목 합산 소계를 먼저 렌더링
             if selected_usages:
@@ -361,10 +348,17 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
 
                 st.divider()
 
-            # ★ [2번] 용도별 경제성 요약 표를 그 다음에 렌더링
+            # ★ [2번] 용도별 경제성 요약 — data_editor를 여기에만 렌더링
             st.subheader("2. 📁 용도별 경제성 요약 (분석 대상 선택)")
-            st.dataframe(
-                df_usage_summary.style.format({
+
+            # session_state 선택값을 df에 반영
+            df_usage_for_editor = df_usage_summary.copy()
+            df_usage_for_editor["선택"] = df_usage_for_editor["용도"].map(
+                lambda u: st.session_state[ss_key].get(u, True)
+            )
+
+            edited_df = st.data_editor(
+                df_usage_for_editor.style.format({
                     "투자길이(m)": "{:,.0f}",
                     "투자금액(원)": "{:,.0f}",
                     "공급전수(전)": "{:,.0f}",
@@ -372,10 +366,20 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "NPV(원)": "{:,.0f}",
                     "IRR(%)": lambda x: f"{x:,.2f}" if pd.notnull(x) else ""
                 }),
+                column_config={
+                    "선택": st.column_config.CheckboxColumn("선택")
+                },
+                disabled=["용도", "투자길이(m)", "투자금액(원)", "공급전수(전)", "연간판매량(MJ)", "NPV(원)", "IRR(%)"],
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
+                key="usage_editor_main"
             )
-            st.caption("💡 분석에서 제외할 용도는 위 숨겨진 편집 표(페이지 상단)에서 체크를 해제하세요.")
+
+            # 체크박스 변경 시 session_state 업데이트 후 재실행
+            new_selection = {row["용도"]: row["선택"] for _, row in edited_df.iterrows()}
+            if new_selection != st.session_state[ss_key]:
+                st.session_state[ss_key] = new_selection
+                st.rerun()
 
             if selected_usages:
                 st.divider()

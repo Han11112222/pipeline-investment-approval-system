@@ -1055,25 +1055,25 @@ elif menu_choice == '3. 품의서 결재':
                     <div style="background: linear-gradient(135deg, #EBF5FB 0%, #D6EAF8 100%);
                                 border-radius: 12px; padding: 20px 28px; margin-bottom: 24px;
                                 border: 1px solid #AED6F1;">
-                        <p style="margin:0 0 12px 0; font-size:13px; color:#2C3E50; font-weight:600;">
+                        <p style="margin:0 0 14px 0; font-size:17px; color:#2C3E50; font-weight:600;">
                             📋 {selected_cha_t3}차 품의서 요약
                         </p>
                         <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
                             <div style="flex:1; min-width:140px; text-align:center;">
-                                <div style="font-size:12px; color:#5D6D7E;">총 건수</div>
-                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_cnt} <span style="font-size:14px; font-weight:400;">건</span></div>
+                                <div style="font-size:16px; color:#5D6D7E;">총 건수</div>
+                                <div style="font-size:32px; font-weight:700; color:#1A5276;">{_tot_cnt} <span style="font-size:18px; font-weight:400;">건</span></div>
                             </div>
                             <div style="flex:1; min-width:140px; text-align:center;">
-                                <div style="font-size:12px; color:#5D6D7E;">총 배관투자금액</div>
-                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_inv:,.0f} <span style="font-size:14px; font-weight:400;">원</span></div>
+                                <div style="font-size:16px; color:#5D6D7E;">총 배관투자금액</div>
+                                <div style="font-size:32px; font-weight:700; color:#1A5276;">{_tot_inv:,.0f} <span style="font-size:18px; font-weight:400;">원</span></div>
                             </div>
                             <div style="flex:1; min-width:140px; text-align:center;">
-                                <div style="font-size:12px; color:#5D6D7E;">합산 NPV</div>
-                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_npv_pre:,.0f} <span style="font-size:14px; font-weight:400;">원</span></div>
+                                <div style="font-size:16px; color:#5D6D7E;">합산 NPV</div>
+                                <div style="font-size:32px; font-weight:700; color:#1A5276;">{_tot_npv_pre:,.0f} <span style="font-size:18px; font-weight:400;">원</span></div>
                             </div>
                             <div style="flex:1; min-width:140px; text-align:center;">
-                                <div style="font-size:12px; color:#5D6D7E;">합산 IRR</div>
-                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_irr_str}</div>
+                                <div style="font-size:16px; color:#5D6D7E;">합산 IRR</div>
+                                <div style="font-size:32px; font-weight:700; color:#1A5276;">{_irr_str}</div>
                             </div>
                         </div>
                     </div>

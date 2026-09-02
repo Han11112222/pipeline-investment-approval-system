@@ -91,7 +91,7 @@ with st.sidebar:
                 if f.endswith(('.csv', '.xlsx', '.xls')) and not f.startswith('~'):
                     if '승인내역' in f:
                         continue
-                    if '기초자료' in f or '현황' in f or '투자' in f:
+                    if '기초자료' in f or '현황' in f or '투자' in f or '품의서' in f:
                         scanned_files.append(os.path.join(root, f))
         
         working_files = list(set(scanned_files))
@@ -132,8 +132,10 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
             try:
                 file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
                 
-                # 현황정리 파일 또는 승인내역 파일은 탭1에서 제외
-                if '현황' in file_name or '승인내역' in file_name or ('투자' in file_name and '기초자료' not in file_name):
+                # 현황정리 파일 또는 승인내역/품의서 파일은 탭1에서 제외
+                if '현황' in file_name or '승인내역' in file_name or '품의서' in file_name:
+                    continue
+                if '투자' in file_name and '기초자료' not in file_name:
                     continue
                     
                 if hasattr(file_obj, 'seek'):
@@ -276,18 +278,14 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 })
                 
             df_usage_summary = pd.DataFrame(usage_results)
-            # session_state로 선택 상태 관리 (초기값 설정)
             ss_key = "usage_selection"
             if ss_key not in st.session_state:
                 st.session_state[ss_key] = {row["용도"]: row["선택"] for row in usage_results}
             else:
-                # 새 용도가 생기면 기본값 추가
                 for row in usage_results:
                     if row["용도"] not in st.session_state[ss_key]:
                         st.session_state[ss_key][row["용도"]] = row["선택"]
-            # session_state 기준으로 선택된 용도 결정
             selected_usages = [row["용도"] for row in usage_results if st.session_state[ss_key].get(row["용도"], row["선택"])]
-            # ★ [1번] 선택 항목 합산 소계를 먼저 렌더링
             if selected_usages:
                 final_filtered_df = filtered_clean_df[filtered_clean_df['용도'].isin(selected_usages)]
                 t_len, t_net_inv, t_vol, tot_npv, tot_irr, tot_irr_msg = get_analysis_result(final_filtered_df[num_cols].sum(), '합산')
@@ -314,9 +312,7 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                     "NPV(원)": "{:,.0f}"
                 }), hide_index=True)
                 st.divider()
-            # ★ [2번] 용도별 경제성 요약 — data_editor를 여기에만 렌더링
             st.subheader("2. 📁 용도별 경제성 요약 (분석 대상 선택)")
-            # session_state 선택값을 df에 반영
             df_usage_for_editor = df_usage_summary.copy()
             df_usage_for_editor["선택"] = df_usage_for_editor["용도"].map(
                 lambda u: st.session_state[ss_key].get(u, True)
@@ -338,7 +334,6 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
                 use_container_width=True,
                 key="usage_editor_main"
             )
-            # 체크박스 변경 시 session_state 업데이트 후 재실행
             new_selection = {row["용도"]: row["선택"] for _, row in edited_df.iterrows()}
             if new_selection != st.session_state[ss_key]:
                 st.session_state[ss_key] = new_selection
@@ -414,16 +409,18 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                 file_name = file_obj.name if hasattr(file_obj, 'name') else os.path.basename(file_obj)
                 if hasattr(file_obj, 'seek'):
                     file_obj.seek(0)
+
+                # 품의서 파일은 탭2에서 제외
+                if '품의서' in file_name:
+                    continue
                     
                 match = re.search(r'(\d+)차', file_name)
                 file_cha = int(match.group(1)) if match else 1
                 chas.append(file_cha)
                 
-                # 승인내역 파일은 탭2에서도 제외 (저장용 파일)
                 if '승인내역' in file_name:
                     continue
                 
-                # A. 공무팀 현황정리 파일
                 if '현황' in file_name or ('투자' in file_name and '기초자료' not in file_name):
                     if file_name.endswith('.csv'):
                         df_status = pd.read_csv(file_obj, header=None, encoding='utf-8-sig')
@@ -457,7 +454,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                                 except:
                                     pass
                 
-                # B. 수요개발배관(기초자료) 파일
                 else:
                     if file_name.endswith('.csv'):
                         df = pd.read_csv(file_obj, header=None, encoding='utf-8-sig') 
@@ -516,7 +512,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
                     all_data_unfiltered.append(extracted)
             except Exception as e:
                 pass
-    # --- 메인 화면 상단 ---
     st.title("📋 2026년도 배관 투자 승인 내역")
     st.markdown("깃허브 파일 데이터를 바탕으로 **수요개발은 자동 계산**하고, **기본계획/인입은 공무팀 실적 파일과 연동**하여 산출합니다.")
     if working_files:
@@ -533,7 +528,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
     else:
         selected_cha_t2 = 1
         view_mode_t2 = "1. 당해차수 데이터"
-    # --- 좌측 사이드바 ---
     with st.sidebar:
         st.header("💰 2026년 사업계획 투자한도액 세팅")
         
@@ -618,7 +612,6 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             "금회_금액": [in_c_a]
         })
         edited_in = st.data_editor(df_in_base, key=f"in_editor_{selected_cha_t2}", hide_index=True, use_container_width=True)
-    # --- 메인 화면 하단: 표 및 그래프 렌더링 ---
     if working_files:
         if all_data_unfiltered:
             all_parsed_df = pd.concat(all_data_unfiltered, ignore_index=True)
@@ -890,56 +883,34 @@ elif menu_choice == '2. 배관 투자 승인 내역':
 # ==========================================================================
 elif menu_choice == '3. 품의서 결재':
 
-    # ── 사이드바: 품의서 파일 업로드 ──
+    # ── 사이드바: 안내만 표시 (별도 업로더 없음) ──
     with st.sidebar:
-        st.header("📄 품의서 엑셀 파일")
-        st.markdown("품의서 엑셀 파일을 업로드하면 **용도별분석** 및 **총괄경제** 시트를 자동으로 표시합니다.")
-        puy_uploaded = st.file_uploader(
-            "품의서 파일 업로드 (.xlsx)",
-            type=["xlsx", "xls"],
-            key="puy_uploader"
+        st.header("📄 품의서 결재")
+        st.info(
+            "품의서 파일은 **좌측 상단 공통 업로더**에서 함께 업로드하거나, "
+            "깃허브에 파일명에 **'품의서'** 가 포함된 엑셀을 올려두면 자동으로 감지됩니다."
         )
-        # 자동 스캔 (깃허브 파일 중 품의서 포함 파일)
-        puy_auto_path = None
-        if puy_uploaded is None:
-            for root, dirs, files in os.walk("."):
-                if '.git' in root or '.streamlit' in root:
-                    continue
-                for f in files:
-                    if f.endswith(('.xlsx', '.xls')) and not f.startswith('~') and '품의서' in f:
-                        puy_auto_path = os.path.join(root, f)
-                        break
-                if puy_auto_path:
-                    break
-            if puy_auto_path:
-                st.success(f"💡 자동 감지: {os.path.basename(puy_auto_path)}")
+
+    # ── working_files 중 품의서 파일 자동 탐색 ──
+    puy_file_obj = None
+    puy_file_name = ""
+    for wf in working_files:
+        wf_name = wf.name if hasattr(wf, 'name') else os.path.basename(wf)
+        if '품의서' in wf_name:
+            puy_file_obj = wf
+            puy_file_name = wf_name
+            break
 
     # ── 메인: 품의서 결재 화면 ──
     st.title("📄 품의서 결재")
     st.markdown("업로드된 품의서 엑셀의 **용도별분석** 시트와 **총괄경제(구간별)** 시트를 표시합니다.")
 
-    # 파일 소스 결정
-    puy_file_obj = None
-    puy_file_name = ""
-    if puy_uploaded is not None:
-        puy_file_obj = puy_uploaded
-        puy_file_name = puy_uploaded.name
-    elif puy_auto_path is not None:
-        puy_file_obj = puy_auto_path
-        puy_file_name = os.path.basename(puy_auto_path)
-    else:
-        # working_files 중 품의서 포함 파일 자동 탐색
-        for wf in working_files:
-            wf_name = wf.name if hasattr(wf, 'name') else os.path.basename(wf)
-            if '품의서' in wf_name:
-                puy_file_obj = wf
-                puy_file_name = wf_name
-                break
-
     if puy_file_obj is None:
-        st.info("👆 좌측 사이드바에서 품의서 엑셀 파일을 업로드하거나, 깃허브 저장소에 파일명에 '품의서'가 포함된 엑셀을 업로드해 주세요.")
+        st.info(
+            "👆 좌측 상단 사이드바의 **수동 파일 업로드**에 품의서 엑셀을 포함시키거나, "
+            "깃허브 저장소에 파일명에 '품의서'가 포함된 엑셀 파일을 올려주세요."
+        )
     else:
-        # 파일 읽기
         try:
             if hasattr(puy_file_obj, 'seek'):
                 puy_file_obj.seek(0)
@@ -951,7 +922,7 @@ elif menu_choice == '3. 품의서 결재':
 
             sheet_names = xls_puy.sheet_names
 
-            # ── 차수 정보 표시 ──
+            # ── 차수 정보 ──
             match_cha = re.search(r'(\d+)차', puy_file_name)
             cha_label = f"{match_cha.group(1)}차" if match_cha else "해당 차수"
             st.markdown(f"**📌 적용 파일:** `{puy_file_name}` · 대상 차수: **{cha_label}**")
@@ -966,8 +937,6 @@ elif menu_choice == '3. 품의서 결재':
 
                 df_ydb = xls_puy.parse('용도별분석', header=None)
 
-                # ── 용도별분석 데이터 추출 ──
-                # 데이터 행: col3에 유효 용도명이 있는 행
                 ydb_valid_usages = ['용도별', '공공택지', '공동주택', '산업용', '업무용',
                                     '연료전지', '열병합', '열전용설비', '영업용', '주택용',
                                     '투자보수율가산', '배관투자재원']
@@ -975,7 +944,6 @@ elif menu_choice == '3. 품의서 결재':
                 ydb_rows = []
                 for i in range(len(df_ydb)):
                     v3 = str(df_ydb.iloc[i, 3]).strip().replace('\n', '').replace(' ', '')
-                    # 용도명 매칭 (공백·개행 제거 후)
                     matched_label = None
                     for u in ydb_valid_usages:
                         if u.replace(' ', '') == v3 or v3.startswith(u.replace(' ', '')):
@@ -999,22 +967,18 @@ elif menu_choice == '3. 품의서 결재':
                             f = float(s)
                             return f"{f:.2f}%" if f > 0 else '-'
                         except:
-                            return s  # 텍스트(한도초과 등) 그대로
+                            return s
 
                     건수   = _num(df_ydb.iloc[i, 2])
                     길이   = _num(df_ydb.iloc[i, 4])
                     배관투자 = _num(df_ydb.iloc[i, 5])
                     시설투자 = _num(df_ydb.iloc[i, 6])
                     총투자  = _num(df_ydb.iloc[i, 7])
-                    # 시설분담금: col43
                     시설분담 = _num(df_ydb.iloc[i, 43]) if df_ydb.shape[1] > 43 else 0
-                    # 연간판매량(MJ/년): col63
                     판매량  = _num(df_ydb.iloc[i, 63]) if df_ydb.shape[1] > 63 else 0
-                    # 연간판매액: col64, 판매원가: col65, 판매수익: col66
                     판매액  = _num(df_ydb.iloc[i, 64]) if df_ydb.shape[1] > 64 else 0
                     판매원가 = _num(df_ydb.iloc[i, 65]) if df_ydb.shape[1] > 65 else 0
                     판매수익 = _num(df_ydb.iloc[i, 66]) if df_ydb.shape[1] > 66 else 0
-                    # 회수년수: col67, NPV: col68, IRR: col69
                     회수년수 = _num(df_ydb.iloc[i, 67]) if df_ydb.shape[1] > 67 else 0
                     npv_raw = df_ydb.iloc[i, 68] if df_ydb.shape[1] > 68 else 0
                     irr_raw = df_ydb.iloc[i, 69] if df_ydb.shape[1] > 69 else 0
@@ -1041,14 +1005,11 @@ elif menu_choice == '3. 품의서 결재':
                 if ydb_rows:
                     df_ydb_show = pd.DataFrame(ydb_rows)
 
-                    # 총계행 강조 스타일
                     def _style_ydb(row):
                         if row['용도'] == '용도별':
                             return ['background-color: #D0E8FF; font-weight: bold'] * len(row)
                         if row['용도'] in ['배관투자재원']:
                             return ['background-color: #F5F5F5; color: #888888'] * len(row)
-                        if row['길이(m)'] == 0 and row['건수'] == 0:
-                            return ['color: #AAAAAA'] * len(row)
                         return [''] * len(row)
 
                     num_fmt_ydb = {
@@ -1071,7 +1032,6 @@ elif menu_choice == '3. 품의서 결재':
                         hide_index=True,
                     )
 
-                    # 요약 지표 메트릭
                     total_row = df_ydb_show[df_ydb_show['용도'] == '용도별']
                     if not total_row.empty:
                         tr = total_row.iloc[0]
@@ -1092,12 +1052,10 @@ elif menu_choice == '3. 품의서 결재':
             # ══════════════════════════════════════════════════════════
             if '총괄경제' in sheet_names:
                 st.subheader("2. 📋 신규 배관 투자 경제성 분석서 (구간별 / 총괄경제)")
-                st.caption("※ 공사명별 투자 현황 및 경제성 지표를 나타냅니다. 용도 섹션은 파란색으로 구분됩니다.")
+                st.caption("※ 공사명별 투자 현황 및 경제성 지표를 나타냅니다.")
 
                 df_tg = xls_puy.parse('총괄경제', header=None)
 
-                # ── 총괄경제 데이터 추출 ──
-                # col2: 용도 섹션명 / col3: 공사명(데이터행) / col4: 길이(유효 데이터 판별)
                 tg_section_labels = ['공공택지', '공동주택', '산업용', '업무용', '연료전지',
                                      '열병합', '열전용설비', '영업용', '주택용', '투자보수율가산', '투자재원']
                 tg_rows = []
@@ -1108,13 +1066,11 @@ elif menu_choice == '3. 품의서 결재':
                     v3 = str(df_tg.iloc[i, 3]).strip()
                     v4 = df_tg.iloc[i, 4]
 
-                    # 용도 섹션 헤더 감지
                     for sl in tg_section_labels:
                         if v2 == sl.replace(' ', '') or v2.startswith(sl.replace(' ', '')):
                             current_section = sl
                             break
 
-                    # 데이터 행: col3에 공사명, col4에 숫자(길이)
                     if v3 in ['nan', 'NaN', '', 'None']:
                         continue
                     try:
@@ -1123,10 +1079,8 @@ elif menu_choice == '3. 품의서 결재':
                         continue
                     if len_val <= 0:
                         continue
-                    # 헤더나 합계 행 제외
                     if any(kw in v3 for kw in ['합계', '소계', '총계', '공사명', '용도별']):
                         continue
-                    # 숫자만인 경우 건수 행으로 제외
                     try:
                         float(v3.replace(',', ''))
                         continue
@@ -1148,14 +1102,13 @@ elif menu_choice == '3. 품의서 결재':
                             f = float(s)
                             return f"{f:.2f}%" if f > 0 else '-'
                         except:
-                            return str(df_tg.iloc[i, col_idx]).strip()  # 한도초과 등
+                            return str(df_tg.iloc[i, col_idx]).strip()
 
                     배관투자 = _tg_num(5)
                     시설투자 = _tg_num(6)
                     총투자  = _tg_num(7)
                     판매량  = _tg_num(63) if df_tg.shape[1] > 63 else 0
                     판매액  = _tg_num(64) if df_tg.shape[1] > 64 else 0
-                    # 총괄경제: col65=회수년수, col66=NPV, col67=IRR
                     회수년수_raw = df_tg.iloc[i, 65] if df_tg.shape[1] > 65 else 0
                     npv_raw  = df_tg.iloc[i, 66] if df_tg.shape[1] > 66 else 0
                     irr_raw  = df_tg.iloc[i, 67] if df_tg.shape[1] > 67 else 0
@@ -1188,7 +1141,6 @@ elif menu_choice == '3. 품의서 결재':
                 if tg_rows:
                     df_tg_show = pd.DataFrame(tg_rows)
 
-                    # 필터: 용도 선택
                     avail_sections = [s for s in tg_section_labels if s in df_tg_show['용도'].values]
                     sel_sections = st.multiselect(
                         "표시할 용도 필터 (전체 = 선택 없음)",
@@ -1198,7 +1150,6 @@ elif menu_choice == '3. 품의서 결재':
                     )
                     df_tg_filtered = df_tg_show[df_tg_show['용도'].isin(sel_sections)] if sel_sections else df_tg_show.copy()
 
-                    # 용도별 색상 강조 스타일
                     section_colors = {
                         '공동주택': '#EBF5FB',
                         '산업용':   '#FEF9E7',
@@ -1228,7 +1179,6 @@ elif menu_choice == '3. 품의서 결재':
                         hide_index=True,
                     )
 
-                    # 합산 소계 표시
                     st.markdown("#### 📌 용도별 소계")
                     tg_sub = df_tg_filtered.groupby('용도').agg(
                         건수=('공사명', 'count'),
@@ -1239,13 +1189,11 @@ elif menu_choice == '3. 품의서 결재':
                            'NPV(원)': ('NPV(원)', 'sum')}
                     ).reset_index()
 
-                    # 용도 정렬
                     tg_sub['용도_순위'] = tg_sub['용도'].apply(
                         lambda x: tg_section_labels.index(x) if x in tg_section_labels else 999
                     )
                     tg_sub = tg_sub.sort_values('용도_순위').drop(columns=['용도_순위'])
 
-                    # 합계 행 추가
                     total_tg = {
                         '용도': '합계',
                         '건수': tg_sub['건수'].sum(),

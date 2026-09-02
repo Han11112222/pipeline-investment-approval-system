@@ -1004,7 +1004,6 @@ elif menu_choice == '3. 품의서 결재':
             selected_cha_t3 = st.selectbox("📌 기준 차수 선택", available_chas_t3, index=len(available_chas_t3)-1, format_func=lambda x: f"{x}차", key="t3_cha")
             filtered_t3 = t3_df[t3_df['차수'] == selected_cha_t3]
             st.info(f"**{selected_cha_t3}차** 당해차수 품의서를 생성합니다.")
-            st.markdown("---")
 
             if filtered_t3.empty:
                 st.warning(f"{selected_cha_t3}차 데이터가 없습니다.")
@@ -1035,6 +1034,52 @@ elif menu_choice == '3. 품의서 결재':
                     if u_sub['길이'].sum() > 0 or u_sub['투자비'].sum() > 0:
                         usages_with_data.append(u)
                 sorted_usages_t3 = sorted(usages_with_data, key=lambda x: 9999 if x == '투자보수율가산' else (custom_order_t3.index(x) if x in custom_order_t3 else 999))
+
+                # ── 요약 카드 (차수 선택 바로 아래) ──
+                # 먼저 합계를 계산
+                _pre_ydb = []
+                for u in sorted_usages_t3:
+                    u_df_pre = filtered_t3[filtered_t3['용도'] == u]
+                    u_sum_pre = u_df_pre[calc_cols_t3].sum()
+                    u_npv_pre, u_irr_pre, _ = t3_calc(u_sum_pre, u)
+                    _pre_ydb.append({'건수': len(u_df_pre), '배관투자금액': u_sum_pre['투자비'], 'NPV': u_npv_pre})
+                _tot_cnt = sum(r['건수'] for r in _pre_ydb)
+                _tot_inv = sum(r['배관투자금액'] for r in _pre_ydb)
+                _tot_npv_pre = sum(r['NPV'] for r in _pre_ydb)
+                _all_sum_pre = filtered_t3[filtered_t3['용도'].isin(usages_with_data)][calc_cols_t3].sum()
+                _, _tot_irr_pre, _tot_irr_msg_pre = t3_calc(_all_sum_pre, '합산')
+                _irr_str = f"{_tot_irr_pre*100:.2f}%" if _tot_irr_pre is not None else _tot_irr_msg_pre
+
+                st.markdown(
+                    f"""
+                    <div style="background: linear-gradient(135deg, #EBF5FB 0%, #D6EAF8 100%);
+                                border-radius: 12px; padding: 20px 28px; margin-bottom: 24px;
+                                border: 1px solid #AED6F1;">
+                        <p style="margin:0 0 12px 0; font-size:13px; color:#2C3E50; font-weight:600;">
+                            📋 {selected_cha_t3}차 품의서 요약
+                        </p>
+                        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                            <div style="flex:1; min-width:140px; text-align:center;">
+                                <div style="font-size:12px; color:#5D6D7E;">총 건수</div>
+                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_cnt} <span style="font-size:14px; font-weight:400;">건</span></div>
+                            </div>
+                            <div style="flex:1; min-width:140px; text-align:center;">
+                                <div style="font-size:12px; color:#5D6D7E;">총 배관투자금액</div>
+                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_inv:,.0f} <span style="font-size:14px; font-weight:400;">원</span></div>
+                            </div>
+                            <div style="flex:1; min-width:140px; text-align:center;">
+                                <div style="font-size:12px; color:#5D6D7E;">합산 NPV</div>
+                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_tot_npv_pre:,.0f} <span style="font-size:14px; font-weight:400;">원</span></div>
+                            </div>
+                            <div style="flex:1; min-width:140px; text-align:center;">
+                                <div style="font-size:12px; color:#5D6D7E;">합산 IRR</div>
+                                <div style="font-size:24px; font-weight:700; color:#1A5276;">{_irr_str}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+                st.markdown("---")
 
                 # ══════════════════════════════════════════════════════
                 # [섹션 1] 용도별분석
@@ -1093,14 +1138,6 @@ elif menu_choice == '3. 품의서 결재':
                         '전수(전)': '{:,.0f}', '판매량(MJ/년)': '{:,.0f}',
                         '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
                     }), use_container_width=True, hide_index=True)
-
-                    # 요약 메트릭
-                    tot_r = ydb_rows[-1]
-                    mc1, mc2, mc3, mc4 = st.columns(4)
-                    mc1.metric("총 건수", f"{tot_r['건수']} 건")
-                    mc2.metric("총 배관투자금액", f"{tot_r['배관투자금액(원)']:,.0f} 원")
-                    mc3.metric("합산 NPV", f"{tot_r['NPV(원)']:,.0f} 원")
-                    mc4.metric("합산 IRR", str(tot_r['IRR(%)']))
 
                 st.markdown("<hr style='border-top: 2px solid #1e3a8a; margin: 40px 0 20px 0;'>", unsafe_allow_html=True)
 

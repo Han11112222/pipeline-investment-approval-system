@@ -1178,27 +1178,24 @@ elif menu_choice == '3. 품의서 결재':
                         '100m환산세대수': tot_환산세대,
                     })
                     df_ydb = pd.DataFrame(ydb_rows)
-                    # 화면 표시용 컬럼 (주요 12개)
-                    disp_cols_ydb = ['용도', '건수', '길이(m)', '배관투자금액(원)', '총시설분담금',
-                                     '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
-                                     '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
+                    # 화면 표시용 22컬럼 (엑셀과 동일)
+                    disp_cols_ydb = ['용도', '건수', '길이(m)', '배관투자금액(원)', '시설투자', '총투자금액',
+                                     '전수(전)', '가스소비량',
+                                     '분담금일반', '취사전용', '수요가부담금', '총시설분담금',
+                                     '기타이익',
+                                     '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)',
+                                     '회수년수', 'NPV(원)', 'IRR(%)', '100m환산세대수']
                     df_ydb_disp = df_ydb[disp_cols_ydb].copy()
-                    df_ydb_disp.columns = ['용도', '건수', '길이(m)', '배관투자금액(원)', '분담금(원)',
-                                           '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
-                                           '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
 
                     def _sty_ydb(row):
                         if row['용도'] == '합계':
                             return ['background-color: #D0E8FF; font-weight: bold'] * len(row)
                         return [''] * len(row)
 
-                    st.dataframe(df_ydb_disp.style.apply(_sty_ydb, axis=1).format({
-                        '건수': '{:,.0f}', '길이(m)': '{:,.0f}',
-                        '배관투자금액(원)': '{:,.0f}', '분담금(원)': '{:,.0f}',
-                        '전수(전)': '{:,.0f}', '판매량(MJ/년)': '{:,.0f}',
-                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}',
-                        '판매수익(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
-                    }), use_container_width=True, hide_index=True)
+                    fmt_ydb = {c: '{:,.0f}' for c in disp_cols_ydb if c not in ['용도', 'IRR(%)', '회수년수']}
+                    fmt_ydb['100m환산세대수'] = '{:,.2f}'
+                    st.dataframe(df_ydb_disp.style.apply(_sty_ydb, axis=1).format(fmt_ydb),
+                                 use_container_width=True, hide_index=True)
 
                 st.markdown("<hr style='border-top: 2px solid #1e3a8a; margin: 40px 0 20px 0;'>", unsafe_allow_html=True)
 
@@ -1253,14 +1250,14 @@ elif menu_choice == '3. 품의서 결재':
 
                 if tg_rows:
                     df_tg = pd.DataFrame(tg_rows)
-                    # 화면 표시용 컬럼 (주요 12개)
-                    disp_cols_tg = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '총시설분담금',
-                                    '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
-                                    '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
+                    # 화면 표시용 22컬럼 (엑셀과 동일)
+                    disp_cols_tg = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '시설투자', '총투자금액',
+                                    '전수(전)', '가스소비량',
+                                    '분담금일반', '취사전용', '수요가부담금', '총시설분담금',
+                                    '기타이익',
+                                    '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)',
+                                    '회수년수', 'NPV(원)', 'IRR(%)', '100m환산세대수']
                     df_tg_disp = df_tg[disp_cols_tg].copy()
-                    df_tg_disp.columns = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '분담금(원)',
-                                          '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
-                                          '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
 
                     # 용도 필터
                     avail_u = [u for u in sorted_usages_t3 if u in df_tg['용도'].values]
@@ -1275,46 +1272,34 @@ elif menu_choice == '3. 품의서 결재':
                         c = section_colors.get(row['용도'], '')
                         return [f'background-color: {c}'] * len(row) if c else [''] * len(row)
 
-                    st.dataframe(df_tg_f.style.apply(_sty_tg, axis=1).format({
-                        '길이(m)': '{:,.0f}', '배관투자금액(원)': '{:,.0f}',
-                        '분담금(원)': '{:,.0f}',
-                        '전수(전)': '{:,.0f}', '판매량(MJ/년)': '{:,.0f}',
-                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}',
-                        '판매수익(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
-                    }), use_container_width=True, hide_index=True)
+                    fmt_tg = {c: '{:,.0f}' for c in disp_cols_tg if c not in ['용도', '공사명', 'IRR(%)', '회수년수']}
+                    fmt_tg['100m환산세대수'] = '{:,.2f}'
+                    st.dataframe(df_tg_f.style.apply(_sty_tg, axis=1).format(fmt_tg),
+                                 use_container_width=True, hide_index=True)
 
-                    # 용도별 소계
+                    # 용도별 소계 — df_ydb(용도별분석) 데이터를 그대로 사용 (이미 22컬럼 집계 완료)
                     st.markdown("#### 📌 용도별 소계")
-                    tg_sub = df_tg_f.copy()
-                    for nc in ['길이(m)', '배관투자금액(원)', '분담금(원)', '전수(전)', '판매량(MJ/년)',
-                               '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)', 'NPV(원)']:
-                        tg_sub[nc] = pd.to_numeric(tg_sub[nc], errors='coerce').fillna(0)
-
-                    tg_agg = tg_sub.groupby('용도').agg(
-                        건수=('공사명', 'count'),
-                        **{'길이(m)': ('길이(m)', 'sum'), '배관투자금액(원)': ('배관투자금액(원)', 'sum'),
-                           '전수(전)': ('전수(전)', 'sum'),
-                           '판매량(MJ/년)': ('판매량(MJ/년)', 'sum'), 'NPV(원)': ('NPV(원)', 'sum')}
-                    ).reset_index()
-                    tg_agg['용도_순위'] = tg_agg['용도'].apply(lambda x: 9999 if x == '투자보수율가산' else (custom_order_t3.index(x) if x in custom_order_t3 else 999))
-                    tg_agg = tg_agg.sort_values('용도_순위').drop(columns=['용도_순위'])
-                    tg_agg = pd.concat([tg_agg, pd.DataFrame([{
-                        '용도': '합계', '건수': tg_agg['건수'].sum(),
-                        '길이(m)': tg_agg['길이(m)'].sum(), '배관투자금액(원)': tg_agg['배관투자금액(원)'].sum(),
-                        '전수(전)': tg_agg['전수(전)'].sum(),
-                        '판매량(MJ/년)': tg_agg['판매량(MJ/년)'].sum(), 'NPV(원)': tg_agg['NPV(원)'].sum(),
-                    }])], ignore_index=True)
+                    disp_cols_sub = ['용도', '건수', '길이(m)', '배관투자금액(원)', '시설투자', '총투자금액',
+                                     '전수(전)', '가스소비량',
+                                     '분담금일반', '취사전용', '수요가부담금', '총시설분담금',
+                                     '기타이익',
+                                     '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)',
+                                     '회수년수', 'NPV(원)', 'IRR(%)', '100m환산세대수']
+                    # 필터 적용: 선택된 용도만 + 합계
+                    if sel_u:
+                        df_sub_disp = df_ydb[df_ydb['용도'].isin(sel_u + ['합계'])][disp_cols_sub].copy()
+                    else:
+                        df_sub_disp = df_ydb[disp_cols_sub].copy()
 
                     def _sty_agg(row):
                         if row['용도'] == '합계':
                             return ['background-color: #D6EAF8; font-weight: bold'] * len(row)
                         return [''] * len(row)
 
-                    st.dataframe(tg_agg.style.apply(_sty_agg, axis=1).format({
-                        '건수': '{:,.0f}', '길이(m)': '{:,.0f}', '배관투자금액(원)': '{:,.0f}',
-                        '전수(전)': '{:,.0f}',
-                        '판매량(MJ/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
-                    }), use_container_width=True, hide_index=True)
+                    fmt_sub = {c: '{:,.0f}' for c in disp_cols_sub if c not in ['용도', 'IRR(%)', '회수년수']}
+                    fmt_sub['100m환산세대수'] = '{:,.2f}'
+                    st.dataframe(df_sub_disp.style.apply(_sty_agg, axis=1).format(fmt_sub),
+                                 use_container_width=True, hide_index=True)
 
                 # ══════════════════════════════════════════════════════
                 # [섹션 3] B4 가로 엑셀 다운로드 (22컬럼 다단 헤더)

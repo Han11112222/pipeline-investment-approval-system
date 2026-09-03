@@ -892,6 +892,7 @@ elif menu_choice == '2. 배관 투자 승인 내역':
         else:
             st.info("조건에 맞는 데이터가 없습니다.")
 
+
 # ==========================================================================
 # 탭 3: 품의서 결재 (기초자료에서 자동 생성)
 # ==========================================================================
@@ -918,7 +919,7 @@ elif menu_choice == '3. 품의서 결재':
     if not working_files:
         st.info("👆 좌측 사이드바에 파일이 로드되지 않았습니다. 깃허브에 기초자료 파일을 올리거나 직접 업로드 해주세요.")
     else:
-        # ── 기초자료 파싱 (탭1과 동일 로직) ──
+        # ── 기초자료 파싱 (탭1과 동일 로직 + 추가 컬럼) ──
         t3_clean_list = []
         for file_obj in working_files:
             try:
@@ -950,6 +951,10 @@ elif menu_choice == '3. 품의서 결재':
                 idx_cost = get_col_idx(df, ["연간판매원가", "판매원가"], exact=False)
                 idx_npv = get_col_idx(df, ["NPV"], exact=False)
                 idx_irr = get_col_idx(df, ["IRR"], exact=False)
+                # 추가 컬럼: 가스소비량, 취사전용, 수요가부담금
+                idx_gas_vol = get_col_idx(df, ["가스소비량", "소비량합계"], exact=False)
+                idx_dambu_cook = get_col_idx(df, ["취사전용"], exact=False)
+                idx_dambu_demand = get_col_idx(df, ["수요가부담금"], exact=False)
                 if idx_name is None:
                     continue
                 md = {}
@@ -968,6 +973,9 @@ elif menu_choice == '3. 품의서 결재':
                 md['판매원가'] = df.iloc[:, idx_cost] if idx_cost is not None else 0
                 md['원본_NPV'] = df.iloc[:, idx_npv] if idx_npv is not None else 0
                 md['원본_IRR'] = df.iloc[:, idx_irr] if idx_irr is not None else 0
+                md['가스소비량'] = df.iloc[:, idx_gas_vol] if idx_gas_vol is not None else 0
+                md['취사전용'] = df.iloc[:, idx_dambu_cook] if idx_dambu_cook is not None else 0
+                md['수요가부담금'] = df.iloc[:, idx_dambu_demand] if idx_dambu_demand is not None else 0
                 t3_clean_list.append(pd.DataFrame(md))
             except:
                 pass
@@ -986,7 +994,9 @@ elif menu_choice == '3. 품의서 결재':
             t3_df = t3_df[~t3_df['구간명'].str.lower().isin(invalid_names)]
             t3_df = t3_df[~t3_df['구간명'].str.contains('합계|소계|총계|ROE', na=False, regex=True)]
             t3_df = t3_df.drop_duplicates(subset=['차수', '구간명'], keep='last')
-            num_cols_t3 = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수', '판매량', '판매액', '판매원가', '원본_NPV', '원본_IRR']
+            num_cols_t3 = ['길이', '투자비', '분담금', '기타이익', '총전수', '공동주택전수', '단독주택전수',
+                           '판매량', '판매액', '판매원가', '원본_NPV', '원본_IRR',
+                           '가스소비량', '취사전용', '수요가부담금']
             for c in num_cols_t3:
                 if t3_df[c].dtype == object:
                     t3_df[c] = t3_df[c].astype(str).str.replace(',', '', regex=False)
@@ -997,7 +1007,8 @@ elif menu_choice == '3. 품의서 결재':
             is_home_t3 = tmp_u.str.contains('주택|가정|공동|택지') & ~tmp_u.str.contains('외')
             t3_df.loc[is_home_t3, '기본요금수익'] = t3_df.loc[is_home_t3, '총전수'] * sim_basic_price_t3 * 12
 
-            calc_cols_t3 = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가', '기본요금수익', '원본_NPV', '원본_IRR']
+            calc_cols_t3 = ['길이', '투자비', '분담금', '기타이익', '총전수', '판매량', '판매액', '판매원가',
+                            '기본요금수익', '원본_NPV', '원본_IRR', '가스소비량', '취사전용', '수요가부담금']
 
             # ── 차수 선택 ──
             available_chas_t3 = sorted(t3_df['차수'].unique())
@@ -1008,9 +1019,9 @@ elif menu_choice == '3. 품의서 결재':
             if filtered_t3.empty:
                 st.warning(f"{selected_cha_t3}차 데이터가 없습니다.")
             else:
-                # ── NPV/IRR 계산 함수 ──
+                # ── NPV/IRR/회수년수 계산 함수 (4값 반환) ──
                 def t3_calc(row, usage_val=''):
-                    npv_s, irr_s, irr_msg_s, _ = calculate_simulation(
+                    npv_s, irr_s, irr_msg_s, flows_s = calculate_simulation(
                         row['길이'], row['투자비'], row['분담금'], row['기타이익'],
                         row['판매량'], row['판매액'], row['판매원가'],
                         row['총전수'], row['기본요금수익'],
@@ -1023,7 +1034,16 @@ elif menu_choice == '3. 품의서 결재':
                         irr_msg = ""
                     else:
                         npv = npv_s; irr = irr_s; irr_msg = irr_msg_s
-                    return npv, irr, irr_msg
+                    # 회수년수 계산
+                    payback = None
+                    if flows_s:
+                        cum = 0
+                        for yi, fv in enumerate(flows_s):
+                            cum += fv
+                            if cum >= 0 and yi > 0:
+                                payback = yi
+                                break
+                    return npv, irr, irr_msg, payback
 
                 custom_order_t3 = ["공공택지", "공동주택", "산업용", "업무용", "영업용", "연료전지용", "주택용", "주택용(지자체)"]
                 unique_usages_t3 = filtered_t3['용도'].unique().tolist()
@@ -1036,18 +1056,17 @@ elif menu_choice == '3. 품의서 결재':
                 sorted_usages_t3 = sorted(usages_with_data, key=lambda x: 9999 if x == '투자보수율가산' else (custom_order_t3.index(x) if x in custom_order_t3 else 999))
 
                 # ── 요약 카드 (차수 선택 바로 아래) ──
-                # 먼저 합계를 계산
                 _pre_ydb = []
                 for u in sorted_usages_t3:
                     u_df_pre = filtered_t3[filtered_t3['용도'] == u]
                     u_sum_pre = u_df_pre[calc_cols_t3].sum()
-                    u_npv_pre, u_irr_pre, _ = t3_calc(u_sum_pre, u)
+                    u_npv_pre, u_irr_pre, _, _ = t3_calc(u_sum_pre, u)
                     _pre_ydb.append({'건수': len(u_df_pre), '배관투자금액': u_sum_pre['투자비'], 'NPV': u_npv_pre})
                 _tot_cnt = sum(r['건수'] for r in _pre_ydb)
                 _tot_inv = sum(r['배관투자금액'] for r in _pre_ydb)
                 _tot_npv_pre = sum(r['NPV'] for r in _pre_ydb)
                 _all_sum_pre = filtered_t3[filtered_t3['용도'].isin(usages_with_data)][calc_cols_t3].sum()
-                _, _tot_irr_pre, _tot_irr_msg_pre = t3_calc(_all_sum_pre, '합산')
+                _, _tot_irr_pre, _tot_irr_msg_pre, _ = t3_calc(_all_sum_pre, '합산')
                 _irr_str = f"{_tot_irr_pre*100:.2f}%" if _tot_irr_pre is not None else _tot_irr_msg_pre
 
                 st.markdown(
@@ -1089,54 +1108,96 @@ elif menu_choice == '3. 품의서 결재':
                 for u in sorted_usages_t3:
                     u_df = filtered_t3[filtered_t3['용도'] == u]
                     u_sum = u_df[calc_cols_t3].sum()
-                    u_npv, u_irr, u_irr_msg = t3_calc(u_sum, u)
+                    u_npv, u_irr, u_irr_msg, u_payback = t3_calc(u_sum, u)
                     건수 = len(u_df)
-                    irr_disp = f"{u_irr*100:.2f}%" if u_irr is not None and u != '투자보수율가산' else (u_irr_msg if u_irr_msg else '-')
+                    # IRR 표시: 100% 초과 시 "한도초과"
+                    if u == '투자보수율가산':
+                        irr_disp = '-'
+                    elif u_irr is not None:
+                        if u_irr * 100 > 100:
+                            irr_disp = '한도초과'
+                        else:
+                            irr_disp = f"{u_irr*100:.2f}%"
+                    else:
+                        irr_disp = u_irr_msg if u_irr_msg else '-'
+                    # 파생값 계산
+                    판매수익 = u_sum['판매액'] - u_sum['판매원가']
+                    환산세대 = (u_sum['총전수'] / u_sum['길이']) * 100 if u_sum['길이'] > 0 else 0
+                    분담금일반 = u_sum['분담금'] - u_sum['취사전용'] - u_sum['수요가부담금']
+                    if 분담금일반 < 0:
+                        분담금일반 = u_sum['분담금']
                     ydb_rows.append({
-                        '용도': u,
-                        '건수': 건수,
-                        '길이(m)': u_sum['길이'],
-                        '배관투자금액(원)': u_sum['투자비'],
-                        '분담금(원)': u_sum['분담금'],
-                        '순투자(원)': u_sum['투자비'] - u_sum['분담금'] - u_sum['기타이익'],
-                        '전수(전)': u_sum['총전수'],
-                        '판매량(MJ/년)': u_sum['판매량'],
-                        '판매액(원/년)': u_sum['판매액'],
-                        '판매원가(원/년)': u_sum['판매원가'],
-                        'NPV(원)': u_npv,
-                        'IRR(%)': irr_disp,
+                        '용도': u, '건수': 건수, '길이(m)': u_sum['길이'],
+                        '배관투자금액(원)': u_sum['투자비'], '시설투자': 0, '총투자금액': u_sum['투자비'],
+                        '전수(전)': u_sum['총전수'], '가스소비량': u_sum['가스소비량'],
+                        '분담금일반': 분담금일반, '취사전용': u_sum['취사전용'],
+                        '수요가부담금': u_sum['수요가부담금'], '총시설분담금': u_sum['분담금'],
+                        '기타이익': u_sum['기타이익'],
+                        '판매량(MJ/년)': u_sum['판매량'], '판매액(원/년)': u_sum['판매액'],
+                        '판매원가(원/년)': u_sum['판매원가'], '판매수익(원/년)': 판매수익,
+                        '회수년수': u_payback if u_payback is not None else '',
+                        'NPV(원)': u_npv, 'IRR(%)': irr_disp,
+                        '100m환산세대수': 환산세대,
                     })
                 # 합계 행
                 if ydb_rows:
                     all_filtered_sum = filtered_t3[filtered_t3['용도'].isin(usages_with_data)][calc_cols_t3].sum()
-                    tot_npv_t3, tot_irr_t3, tot_irr_msg_t3 = t3_calc(all_filtered_sum, '합산')
-                    tot_irr_disp = f"{tot_irr_t3*100:.2f}%" if tot_irr_t3 is not None else tot_irr_msg_t3
+                    tot_npv_t3, tot_irr_t3, tot_irr_msg_t3, tot_payback_t3 = t3_calc(all_filtered_sum, '합산')
+                    if tot_irr_t3 is not None:
+                        if tot_irr_t3 * 100 > 100:
+                            tot_irr_disp = '한도초과'
+                        else:
+                            tot_irr_disp = f"{tot_irr_t3*100:.2f}%"
+                    else:
+                        tot_irr_disp = tot_irr_msg_t3
+                    tot_판매수익 = sum(r['판매수익(원/년)'] for r in ydb_rows)
+                    tot_길이 = sum(r['길이(m)'] for r in ydb_rows)
+                    tot_전수 = sum(r['전수(전)'] for r in ydb_rows)
+                    tot_환산세대 = (tot_전수 / tot_길이) * 100 if tot_길이 > 0 else 0
                     ydb_rows.append({
                         '용도': '합계',
                         '건수': sum(r['건수'] for r in ydb_rows),
-                        '길이(m)': sum(r['길이(m)'] for r in ydb_rows),
+                        '길이(m)': tot_길이,
                         '배관투자금액(원)': sum(r['배관투자금액(원)'] for r in ydb_rows),
-                        '분담금(원)': sum(r['분담금(원)'] for r in ydb_rows),
-                        '순투자(원)': sum(r['순투자(원)'] for r in ydb_rows),
-                        '전수(전)': sum(r['전수(전)'] for r in ydb_rows),
+                        '시설투자': 0,
+                        '총투자금액': sum(r['총투자금액'] for r in ydb_rows),
+                        '전수(전)': tot_전수,
+                        '가스소비량': sum(r['가스소비량'] for r in ydb_rows),
+                        '분담금일반': sum(r['분담금일반'] for r in ydb_rows),
+                        '취사전용': sum(r['취사전용'] for r in ydb_rows),
+                        '수요가부담금': sum(r['수요가부담금'] for r in ydb_rows),
+                        '총시설분담금': sum(r['총시설분담금'] for r in ydb_rows),
+                        '기타이익': sum(r['기타이익'] for r in ydb_rows),
                         '판매량(MJ/년)': sum(r['판매량(MJ/년)'] for r in ydb_rows),
                         '판매액(원/년)': sum(r['판매액(원/년)'] for r in ydb_rows),
                         '판매원가(원/년)': sum(r['판매원가(원/년)'] for r in ydb_rows),
+                        '판매수익(원/년)': tot_판매수익,
+                        '회수년수': tot_payback_t3 if tot_payback_t3 is not None else '',
                         'NPV(원)': sum(r['NPV(원)'] for r in ydb_rows),
                         'IRR(%)': tot_irr_disp,
+                        '100m환산세대수': tot_환산세대,
                     })
                     df_ydb = pd.DataFrame(ydb_rows)
+                    # 화면 표시용 컬럼 (주요 12개)
+                    disp_cols_ydb = ['용도', '건수', '길이(m)', '배관투자금액(원)', '총시설분담금',
+                                     '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
+                                     '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
+                    df_ydb_disp = df_ydb[disp_cols_ydb].copy()
+                    df_ydb_disp.columns = ['용도', '건수', '길이(m)', '배관투자금액(원)', '분담금(원)',
+                                           '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
+                                           '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
 
                     def _sty_ydb(row):
                         if row['용도'] == '합계':
                             return ['background-color: #D0E8FF; font-weight: bold'] * len(row)
                         return [''] * len(row)
 
-                    st.dataframe(df_ydb.style.apply(_sty_ydb, axis=1).format({
+                    st.dataframe(df_ydb_disp.style.apply(_sty_ydb, axis=1).format({
                         '건수': '{:,.0f}', '길이(m)': '{:,.0f}',
-                        '배관투자금액(원)': '{:,.0f}', '분담금(원)': '{:,.0f}', '순투자(원)': '{:,.0f}',
+                        '배관투자금액(원)': '{:,.0f}', '분담금(원)': '{:,.0f}',
                         '전수(전)': '{:,.0f}', '판매량(MJ/년)': '{:,.0f}',
-                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
+                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}',
+                        '판매수익(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
                     }), use_container_width=True, hide_index=True)
 
                 st.markdown("<hr style='border-top: 2px solid #1e3a8a; margin: 40px 0 20px 0;'>", unsafe_allow_html=True)
@@ -1150,30 +1211,61 @@ elif menu_choice == '3. 품의서 결재':
                 for u in sorted_usages_t3:
                     u_df = filtered_t3[filtered_t3['용도'] == u].sort_values('구간명')
                     for _, row in u_df.iterrows():
-                        r_npv, r_irr, r_irr_msg = t3_calc(row, u)
-                        irr_d = f"{r_irr*100:.2f}%" if r_irr is not None and u != '투자보수율가산' else (r_irr_msg if r_irr_msg else '-')
+                        r_npv, r_irr, r_irr_msg, r_payback = t3_calc(row, u)
+                        if u == '투자보수율가산':
+                            irr_d = '-'
+                        elif r_irr is not None:
+                            if r_irr * 100 > 100:
+                                irr_d = '한도초과'
+                            else:
+                                irr_d = f"{r_irr*100:.2f}%"
+                        else:
+                            irr_d = r_irr_msg if r_irr_msg else '-'
+                        # 파생값
+                        r_판매수익 = row['판매액'] - row['판매원가']
+                        r_환산세대 = (row['총전수'] / row['길이']) * 100 if row['길이'] > 0 else 0
+                        r_분담금일반 = row['분담금'] - row['취사전용'] - row['수요가부담금']
+                        if r_분담금일반 < 0:
+                            r_분담금일반 = row['분담금']
                         tg_rows.append({
                             '용도': u,
                             '공사명': row['구간명'],
                             '길이(m)': row['길이'],
                             '배관투자금액(원)': row['투자비'],
-                            '분담금(원)': row['분담금'],
-                            '순투자(원)': row['투자비'] - row['분담금'] - row['기타이익'],
+                            '시설투자': 0,
+                            '총투자금액': row['투자비'],
                             '전수(전)': row['총전수'],
+                            '가스소비량': row['가스소비량'],
+                            '분담금일반': r_분담금일반,
+                            '취사전용': row['취사전용'],
+                            '수요가부담금': row['수요가부담금'],
+                            '총시설분담금': row['분담금'],
+                            '기타이익': row['기타이익'],
                             '판매량(MJ/년)': row['판매량'],
                             '판매액(원/년)': row['판매액'],
                             '판매원가(원/년)': row['판매원가'],
+                            '판매수익(원/년)': r_판매수익,
+                            '회수년수': r_payback if r_payback is not None else '',
                             'NPV(원)': r_npv,
                             'IRR(%)': irr_d,
+                            '100m환산세대수': r_환산세대,
                         })
 
                 if tg_rows:
                     df_tg = pd.DataFrame(tg_rows)
+                    # 화면 표시용 컬럼 (주요 12개)
+                    disp_cols_tg = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '총시설분담금',
+                                    '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
+                                    '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
+                    df_tg_disp = df_tg[disp_cols_tg].copy()
+                    df_tg_disp.columns = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '분담금(원)',
+                                          '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)',
+                                          '판매수익(원/년)', 'NPV(원)', 'IRR(%)']
 
                     # 용도 필터
                     avail_u = [u for u in sorted_usages_t3 if u in df_tg['용도'].values]
                     sel_u = st.multiselect("표시할 용도 필터 (전체 = 선택 없음)", avail_u, default=[], key="t3_filter")
-                    df_tg_f = df_tg[df_tg['용도'].isin(sel_u)] if sel_u else df_tg.copy()
+                    df_tg_f = df_tg_disp[df_tg_disp['용도'].isin(sel_u)] if sel_u else df_tg_disp.copy()
 
                     section_colors = {
                         '공공택지': '#EBF5FB', '공동주택': '#EBF5FB', '산업용': '#FEF9E7',
@@ -1185,22 +1277,23 @@ elif menu_choice == '3. 품의서 결재':
 
                     st.dataframe(df_tg_f.style.apply(_sty_tg, axis=1).format({
                         '길이(m)': '{:,.0f}', '배관투자금액(원)': '{:,.0f}',
-                        '분담금(원)': '{:,.0f}', '순투자(원)': '{:,.0f}',
+                        '분담금(원)': '{:,.0f}',
                         '전수(전)': '{:,.0f}', '판매량(MJ/년)': '{:,.0f}',
-                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
+                        '판매액(원/년)': '{:,.0f}', '판매원가(원/년)': '{:,.0f}',
+                        '판매수익(원/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
                     }), use_container_width=True, hide_index=True)
 
                     # 용도별 소계
                     st.markdown("#### 📌 용도별 소계")
                     tg_sub = df_tg_f.copy()
-                    # NPV(원) 숫자 변환 (IRR은 문자열이므로 제외)
-                    for nc in ['길이(m)', '배관투자금액(원)', '분담금(원)', '순투자(원)', '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', 'NPV(원)']:
+                    for nc in ['길이(m)', '배관투자금액(원)', '분담금(원)', '전수(전)', '판매량(MJ/년)',
+                               '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)', 'NPV(원)']:
                         tg_sub[nc] = pd.to_numeric(tg_sub[nc], errors='coerce').fillna(0)
 
                     tg_agg = tg_sub.groupby('용도').agg(
                         건수=('공사명', 'count'),
                         **{'길이(m)': ('길이(m)', 'sum'), '배관투자금액(원)': ('배관투자금액(원)', 'sum'),
-                           '순투자(원)': ('순투자(원)', 'sum'), '전수(전)': ('전수(전)', 'sum'),
+                           '전수(전)': ('전수(전)', 'sum'),
                            '판매량(MJ/년)': ('판매량(MJ/년)', 'sum'), 'NPV(원)': ('NPV(원)', 'sum')}
                     ).reset_index()
                     tg_agg['용도_순위'] = tg_agg['용도'].apply(lambda x: 9999 if x == '투자보수율가산' else (custom_order_t3.index(x) if x in custom_order_t3 else 999))
@@ -1208,7 +1301,7 @@ elif menu_choice == '3. 품의서 결재':
                     tg_agg = pd.concat([tg_agg, pd.DataFrame([{
                         '용도': '합계', '건수': tg_agg['건수'].sum(),
                         '길이(m)': tg_agg['길이(m)'].sum(), '배관투자금액(원)': tg_agg['배관투자금액(원)'].sum(),
-                        '순투자(원)': tg_agg['순투자(원)'].sum(), '전수(전)': tg_agg['전수(전)'].sum(),
+                        '전수(전)': tg_agg['전수(전)'].sum(),
                         '판매량(MJ/년)': tg_agg['판매량(MJ/년)'].sum(), 'NPV(원)': tg_agg['NPV(원)'].sum(),
                     }])], ignore_index=True)
 
@@ -1219,12 +1312,12 @@ elif menu_choice == '3. 품의서 결재':
 
                     st.dataframe(tg_agg.style.apply(_sty_agg, axis=1).format({
                         '건수': '{:,.0f}', '길이(m)': '{:,.0f}', '배관투자금액(원)': '{:,.0f}',
-                        '순투자(원)': '{:,.0f}', '전수(전)': '{:,.0f}',
+                        '전수(전)': '{:,.0f}',
                         '판매량(MJ/년)': '{:,.0f}', 'NPV(원)': '{:,.0f}',
                     }), use_container_width=True, hide_index=True)
 
                 # ══════════════════════════════════════════════════════
-                # [섹션 3] B4 가로 엑셀 다운로드
+                # [섹션 3] B4 가로 엑셀 다운로드 (22컬럼 다단 헤더)
                 # ══════════════════════════════════════════════════════
                 st.markdown("<hr style='border-top: 2px solid #1e3a8a; margin: 40px 0 20px 0;'>", unsafe_allow_html=True)
                 st.subheader("3. 📥 품의서 엑셀 다운로드 (B4 가로)")
@@ -1232,117 +1325,259 @@ elif menu_choice == '3. 품의서 결재':
 
                 def generate_excel_b4(ydb_data, tg_data, cha_label):
                     from openpyxl import Workbook
-                    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill, numbers
+                    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
                     from openpyxl.utils import get_column_letter
 
                     wb = Workbook()
                     thin = Side(style='thin')
                     border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
-                    header_font = Font(name='맑은 고딕', bold=True, size=10)
+                    header_font = Font(name='맑은 고딕', bold=True, size=9)
                     title_font = Font(name='맑은 고딕', bold=True, size=14)
-                    data_font = Font(name='맑은 고딕', size=10)
+                    data_font = Font(name='맑은 고딕', size=9)
                     header_fill = PatternFill(start_color='D6EAF8', end_color='D6EAF8', fill_type='solid')
                     total_fill = PatternFill(start_color='FCF3CF', end_color='FCF3CF', fill_type='solid')
                     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
                     right_align = Alignment(horizontal='right', vertical='center')
                     left_align = Alignment(horizontal='left', vertical='center')
                     num_fmt = '#,##0'
-                    pct_fmt = '0.00"%"'
 
-                    # ─── Sheet 1: 용도별분석 ───
-                    ws1 = wb.active
-                    ws1.title = '용도별분석'
-                    ws1.page_setup.paperSize = 12  # B4 JIS
-                    ws1.page_setup.orientation = 'landscape'
-                    ws1.page_setup.fitToWidth = 1
-                    ws1.page_setup.fitToHeight = 0
-                    ws1.sheet_properties.pageSetUpPr.fitToPage = True
-                    ws1.page_margins.left = 0.4
-                    ws1.page_margins.right = 0.4
-                    ws1.page_margins.top = 0.5
-                    ws1.page_margins.bottom = 0.5
+                    # ── 22컬럼 정의 (용도별분석) ──
+                    # col1=건수, col2=용도별, col3=길이, col4~6=투자금액(배관/시설/총),
+                    # col7=수요전수계, col8=가스소비량, col9~12=시설분담금(일반/취사/수요가/총),
+                    # col13=기타이익, col14~17=연간(판매량/판매액/판매원가/판매수익),
+                    # col18~21=경제성분석(회수년수/NPV/IRR/100m환산), col22=비고
+                    ydb_col_keys = [
+                        '건수', '용도', '길이(m)',
+                        '배관투자금액(원)', '시설투자', '총투자금액',
+                        '전수(전)', '가스소비량',
+                        '분담금일반', '취사전용', '수요가부담금', '총시설분담금',
+                        '기타이익',
+                        '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)',
+                        '회수년수', 'NPV(원)', 'IRR(%)', '100m환산세대수',
+                    ]
 
-                    # 타이틀
-                    ws1.merge_cells('A1:L1')
-                    c = ws1['A1']
-                    c.value = f'신규 배관 투자 경제성 분석서 (용도별) - {cha_label}'
-                    c.font = title_font
-                    c.alignment = center_align
+                    # ── 22컬럼 정의 (총괄경제) ──
+                    # col1=용도별, col2=공사명, 나머지 col3~22 동일
+                    tg_col_keys = [
+                        '용도', '공사명', '길이(m)',
+                        '배관투자금액(원)', '시설투자', '총투자금액',
+                        '전수(전)', '가스소비량',
+                        '분담금일반', '취사전용', '수요가부담금', '총시설분담금',
+                        '기타이익',
+                        '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', '판매수익(원/년)',
+                        '회수년수', 'NPV(원)', 'IRR(%)', '100m환산세대수',
+                    ]
 
-                    # 헤더
-                    headers1 = ['용도', '건수', '길이(m)', '배관투자금액(원)', '분담금(원)', '순투자(원)',
-                                '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', 'NPV(원)', 'IRR(%)']
-                    for ci, h in enumerate(headers1, 1):
-                        cell = ws1.cell(row=3, column=ci, value=h)
-                        cell.font = header_font
-                        cell.fill = header_fill
-                        cell.border = border_all
-                        cell.alignment = center_align
+                    def _setup_page(ws):
+                        ws.page_setup.paperSize = 12  # B4 JIS
+                        ws.page_setup.orientation = 'landscape'
+                        ws.page_setup.fitToWidth = 1
+                        ws.page_setup.fitToHeight = 0
+                        ws.sheet_properties.pageSetUpPr.fitToPage = True
+                        ws.page_margins.left = 0.3
+                        ws.page_margins.right = 0.3
+                        ws.page_margins.top = 0.4
+                        ws.page_margins.bottom = 0.4
 
-                    # 데이터
-                    for ri, row_d in enumerate(ydb_data, 4):
-                        vals = [row_d['용도'], row_d['건수'], row_d['길이(m)'], row_d['배관투자금액(원)'],
-                                row_d['분담금(원)'], row_d['순투자(원)'], row_d['전수(전)'],
-                                row_d['판매량(MJ/년)'], row_d['판매액(원/년)'], row_d['판매원가(원/년)'],
-                                row_d['NPV(원)'], row_d['IRR(%)']]
-                        is_total = row_d['용도'] == '합계'
+                    def _write_headers_ydb(ws):
+                        """용도별분석 시트 - 22컬럼 다단 헤더 (row2=타이틀, row4=그룹, row5=세부, row6=단위)"""
+                        ncols = 22
+                        # Row 2: 타이틀
+                        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+                        c = ws.cell(row=2, column=1, value=f'신규 배관 투자 경제성 분석서(용도별) - {cha_label}')
+                        c.font = title_font
+                        c.alignment = center_align
+
+                        # Row 4: 그룹 헤더 (merged)
+                        # 독립 컬럼(row4~5 세로 병합): 건수(1), 용도별(2), 길이(3), 수요전수계(7), 가스소비량합계(8), 기타이익(13), 비고(22)
+                        standalone_cols = {
+                            1: '공급대상\n총계', 2: '용도별', 3: '길이',
+                            7: '수요\n전수계', 8: '가스소비량\n합계', 13: '기타이익', 22: '비고'
+                        }
+                        for col_num, label in standalone_cols.items():
+                            ws.merge_cells(start_row=4, start_column=col_num, end_row=5, end_column=col_num)
+                            cell = ws.cell(row=4, column=col_num, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        # 그룹 병합 헤더 (row4)
+                        groups = [
+                            (4, 6, '투자금액'),
+                            (9, 12, '시설분담금'),
+                            (14, 17, '연간'),
+                            (18, 21, '경제성분석'),
+                        ]
+                        for start_c, end_c, label in groups:
+                            ws.merge_cells(start_row=4, start_column=start_c, end_row=4, end_column=end_c)
+                            cell = ws.cell(row=4, column=start_c, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+                            # 나머지 셀 테두리
+                            for ci in range(start_c+1, end_c+1):
+                                ws.cell(row=4, column=ci).border = border_all
+                                ws.cell(row=4, column=ci).fill = header_fill
+
+                        # Row 5: 세부 헤더
+                        detail_headers = {
+                            4: '배관투자\n금액', 5: '시설투자\n금액', 6: '총투자\n금액',
+                            9: '일반', 10: '취사전용', 11: '수요가\n부담금', 12: '총시설\n분담금',
+                            14: '판매량', 15: '판매액', 16: '판매원가', 17: '판매수익',
+                            18: '회수\n년수', 19: 'NPV', 20: 'IRR', 21: '100m\n환산세대수',
+                        }
+                        for col_num, label in detail_headers.items():
+                            cell = ws.cell(row=5, column=col_num, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        # Row 6: 단위 헤더
+                        unit_headers = {
+                            1: '', 2: '', 3: '(m)',
+                            4: '(원)', 5: '(원)', 6: '(원)',
+                            7: '(전)', 8: '(MJ/년)',
+                            9: '(원)', 10: '(원)', 11: '(원)', 12: '(원)',
+                            13: '(원)',
+                            14: '(MJ/년)', 15: '(원/년)', 16: '(원/년)', 17: '(원/년)',
+                            18: '(년)', 19: '(원)', 20: '(%)', 21: '(세대)',
+                            22: '',
+                        }
+                        for col_num, label in unit_headers.items():
+                            cell = ws.cell(row=6, column=col_num, value=label)
+                            cell.font = Font(name='맑은 고딕', size=8)
+                            cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        # 모든 헤더 행 테두리 보완
+                        for r in [4, 5, 6]:
+                            for ci in range(1, ncols+1):
+                                ws.cell(row=r, column=ci).border = border_all
+
+                    def _write_headers_tg(ws):
+                        """총괄경제 시트 - 22컬럼 다단 헤더"""
+                        ncols = 22
+                        # Row 2: 타이틀
+                        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+                        c = ws.cell(row=2, column=1, value=f'신규 배관 투자 경제성 분석서(구간별) - {cha_label}')
+                        c.font = title_font
+                        c.alignment = center_align
+
+                        # Row 4: 독립 컬럼 (세로 병합)
+                        standalone_cols = {
+                            1: '용도별', 2: '공사명', 3: '길이',
+                            7: '수요\n전수계', 8: '가스소비량\n합계', 13: '기타이익', 22: '비고'
+                        }
+                        for col_num, label in standalone_cols.items():
+                            ws.merge_cells(start_row=4, start_column=col_num, end_row=5, end_column=col_num)
+                            cell = ws.cell(row=4, column=col_num, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        # 그룹 병합 헤더
+                        groups = [
+                            (4, 6, '투자금액'),
+                            (9, 12, '시설분담금'),
+                            (14, 17, '연간'),
+                            (18, 21, '경제성분석'),
+                        ]
+                        for start_c, end_c, label in groups:
+                            ws.merge_cells(start_row=4, start_column=start_c, end_row=4, end_column=end_c)
+                            cell = ws.cell(row=4, column=start_c, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+                            for ci in range(start_c+1, end_c+1):
+                                ws.cell(row=4, column=ci).border = border_all
+                                ws.cell(row=4, column=ci).fill = header_fill
+
+                        # Row 5: 세부 헤더
+                        detail_headers = {
+                            4: '배관투자\n금액', 5: '시설투자\n금액', 6: '총투자\n금액',
+                            9: '일반', 10: '취사전용', 11: '수요가\n부담금', 12: '총시설\n분담금',
+                            14: '판매량', 15: '판매액', 16: '판매원가', 17: '판매수익',
+                            18: '회수\n년수', 19: 'NPV', 20: 'IRR', 21: '100m\n환산세대수',
+                        }
+                        for col_num, label in detail_headers.items():
+                            cell = ws.cell(row=5, column=col_num, value=label)
+                            cell.font = header_font; cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        # Row 6: 단위
+                        unit_headers = {
+                            1: '', 2: '', 3: '(m)',
+                            4: '(원)', 5: '(원)', 6: '(원)',
+                            7: '(전)', 8: '(MJ/년)',
+                            9: '(원)', 10: '(원)', 11: '(원)', 12: '(원)',
+                            13: '(원)',
+                            14: '(MJ/년)', 15: '(원/년)', 16: '(원/년)', 17: '(원/년)',
+                            18: '(년)', 19: '(원)', 20: '(%)', 21: '(세대)',
+                            22: '',
+                        }
+                        for col_num, label in unit_headers.items():
+                            cell = ws.cell(row=6, column=col_num, value=label)
+                            cell.font = Font(name='맑은 고딕', size=8)
+                            cell.fill = header_fill
+                            cell.border = border_all; cell.alignment = center_align
+
+                        for r in [4, 5, 6]:
+                            for ci in range(1, ncols+1):
+                                ws.cell(row=r, column=ci).border = border_all
+
+                    def _write_data_row(ws, row_num, vals, is_total=False, is_subtotal=False):
+                        """22개 값을 한 행에 씀"""
+                        fill = None
+                        if is_total:
+                            fill = total_fill
+                        elif is_subtotal:
+                            fill = PatternFill(start_color='E8F8F5', end_color='E8F8F5', fill_type='solid')
                         for ci, v in enumerate(vals, 1):
-                            cell = ws1.cell(row=ri, column=ci, value=v)
-                            cell.font = Font(name='맑은 고딕', bold=is_total, size=10)
+                            cell = ws.cell(row=row_num, column=ci, value=v)
+                            cell.font = Font(name='맑은 고딕', bold=(is_total or is_subtotal), size=9)
                             cell.border = border_all
-                            if is_total:
-                                cell.fill = total_fill
-                            if ci == 1:
+                            if fill:
+                                cell.fill = fill
+                            # 정렬 및 포맷
+                            if ci in (1, 2):  # 건수/용도 or 용도/공사명
                                 cell.alignment = center_align
-                            elif ci == 12:
+                            elif ci == 20:  # IRR
                                 cell.alignment = right_align
-                            elif ci >= 3:
+                            elif ci == 18:  # 회수년수
                                 cell.alignment = right_align
                                 if isinstance(v, (int, float)):
-                                    cell.number_format = num_fmt
+                                    cell.number_format = '#,##0'
+                            elif ci == 22:  # 비고
+                                cell.alignment = left_align
                             else:
                                 cell.alignment = right_align
                                 if isinstance(v, (int, float)):
                                     cell.number_format = num_fmt
 
+                    # ─── Sheet 1: 용도별분석 ───
+                    ws1 = wb.active
+                    ws1.title = '용도별분석'
+                    _setup_page(ws1)
+                    _write_headers_ydb(ws1)
+
+                    # 데이터 (row 7부터)
+                    data_start = 7
+                    for ri, row_d in enumerate(ydb_data):
+                        is_tot = row_d.get('용도', '') == '합계'
+                        vals = [row_d.get(k, '') for k in ydb_col_keys]
+                        vals.append('')  # 비고 (col22)
+                        _write_data_row(ws1, data_start + ri, vals, is_total=is_tot)
+
                     # 열 너비
-                    col_widths1 = [14, 6, 10, 18, 16, 18, 10, 16, 16, 16, 18, 10]
+                    col_widths1 = [6, 12, 8, 14, 10, 14, 8, 12, 12, 10, 12, 12, 10, 12, 12, 12, 12, 6, 14, 8, 8, 8]
                     for ci, w in enumerate(col_widths1, 1):
                         ws1.column_dimensions[get_column_letter(ci)].width = w
 
                     # ─── Sheet 2: 총괄경제 ───
                     ws2 = wb.create_sheet('총괄경제')
-                    ws2.page_setup.paperSize = 12
-                    ws2.page_setup.orientation = 'landscape'
-                    ws2.page_setup.fitToWidth = 1
-                    ws2.page_setup.fitToHeight = 0
-                    ws2.sheet_properties.pageSetUpPr.fitToPage = True
-                    ws2.page_margins.left = 0.4
-                    ws2.page_margins.right = 0.4
-                    ws2.page_margins.top = 0.5
-                    ws2.page_margins.bottom = 0.5
+                    _setup_page(ws2)
+                    _write_headers_tg(ws2)
 
-                    # 타이틀
-                    ws2.merge_cells('A1:L1')
-                    c2 = ws2['A1']
-                    c2.value = f'신규 배관 투자 경제성 분석서 (구간별) - {cha_label}'
-                    c2.font = title_font
-                    c2.alignment = center_align
-
-                    # 헤더
-                    headers2 = ['용도', '공사명', '길이(m)', '배관투자금액(원)', '분담금(원)', '순투자(원)',
-                                '전수(전)', '판매량(MJ/년)', '판매액(원/년)', '판매원가(원/년)', 'NPV(원)', 'IRR(%)']
-                    for ci, h in enumerate(headers2, 1):
-                        cell = ws2.cell(row=3, column=ci, value=h)
-                        cell.font = header_font
-                        cell.fill = header_fill
-                        cell.border = border_all
-                        cell.alignment = center_align
-
-                    # 용도별 그룹핑
+                    ncols = 22
                     section_fill = PatternFill(start_color='EBF5FB', end_color='EBF5FB', fill_type='solid')
-                    subtotal_fill = PatternFill(start_color='E8F8F5', end_color='E8F8F5', fill_type='solid')
-                    current_row = 4
+                    subtotal_fill_xl = PatternFill(start_color='E8F8F5', end_color='E8F8F5', fill_type='solid')
+                    current_row = 7
+
                     # 용도별로 그룹
                     grouped_tg = {}
                     for r in tg_data:
@@ -1351,9 +1586,8 @@ elif menu_choice == '3. 품의서 결재':
                             grouped_tg[u] = []
                         grouped_tg[u].append(r)
 
-                    grand_totals = {'건수': 0, '길이(m)': 0, '배관투자금액(원)': 0, '분담금(원)': 0,
-                                    '순투자(원)': 0, '전수(전)': 0, '판매량(MJ/년)': 0,
-                                    '판매액(원/년)': 0, '판매원가(원/년)': 0, 'NPV(원)': 0}
+                    grand_sums = {k: 0 for k in tg_col_keys[2:] if k not in ('IRR(%)', '회수년수', '100m환산세대수')}
+                    grand_count = 0
 
                     for u in sorted_usages_t3:
                         if u not in grouped_tg:
@@ -1361,85 +1595,73 @@ elif menu_choice == '3. 품의서 결재':
                         rows_in_group = grouped_tg[u]
 
                         # 용도 섹션 헤더
-                        ws2.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=12)
+                        ws2.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=ncols)
                         sec_cell = ws2.cell(row=current_row, column=1, value=f'■ {u} ({len(rows_in_group)}건)')
-                        sec_cell.font = Font(name='맑은 고딕', bold=True, size=10)
+                        sec_cell.font = Font(name='맑은 고딕', bold=True, size=9)
                         sec_cell.fill = section_fill
                         sec_cell.border = border_all
                         sec_cell.alignment = left_align
-                        for ci2 in range(2, 13):
+                        for ci2 in range(2, ncols+1):
                             ws2.cell(row=current_row, column=ci2).border = border_all
                             ws2.cell(row=current_row, column=ci2).fill = section_fill
                         current_row += 1
 
-                        sub_sums = {k: 0 for k in grand_totals}
-                        sub_sums['건수'] = len(rows_in_group)
+                        # 소계 누적
+                        sub_sums = {k: 0 for k in tg_col_keys[2:] if k not in ('IRR(%)', '회수년수', '100m환산세대수')}
 
                         for row_d in rows_in_group:
-                            vals = ['', row_d['공사명'], row_d['길이(m)'], row_d['배관투자금액(원)'],
-                                    row_d['분담금(원)'], row_d['순투자(원)'], row_d['전수(전)'],
-                                    row_d['판매량(MJ/년)'], row_d['판매액(원/년)'], row_d['판매원가(원/년)'],
-                                    row_d['NPV(원)'], row_d['IRR(%)']]
-                            for ci, v in enumerate(vals, 1):
-                                cell = ws2.cell(row=current_row, column=ci, value=v)
-                                cell.font = data_font
-                                cell.border = border_all
-                                if ci == 2:
-                                    cell.alignment = left_align
-                                elif ci == 12:
-                                    cell.alignment = right_align
-                                elif ci >= 3:
-                                    cell.alignment = right_align
-                                    if isinstance(v, (int, float)):
-                                        cell.number_format = num_fmt
+                            vals = [row_d.get(k, '') for k in tg_col_keys]
+                            vals.append('')  # 비고(col22) - 일련번호 등
+                            _write_data_row(ws2, current_row, vals)
                             # 소계 누적
-                            for k, cidx in [('길이(m)', 2), ('배관투자금액(원)', 3), ('분담금(원)', 4),
-                                            ('순투자(원)', 5), ('전수(전)', 6), ('판매량(MJ/년)', 7),
-                                            ('판매액(원/년)', 8), ('판매원가(원/년)', 9), ('NPV(원)', 10)]:
+                            for k in sub_sums:
                                 try:
-                                    sub_sums[k] += float(vals[cidx])
+                                    sub_sums[k] += float(row_d.get(k, 0) or 0)
                                 except:
                                     pass
                             current_row += 1
 
-                        # 용도 소계
-                        sub_vals = [f'{u} 소계', '', sub_sums['길이(m)'], sub_sums['배관투자금액(원)'],
-                                    sub_sums['분담금(원)'], sub_sums['순투자(원)'], sub_sums['전수(전)'],
-                                    sub_sums['판매량(MJ/년)'], sub_sums['판매액(원/년)'], sub_sums['판매원가(원/년)'],
-                                    sub_sums['NPV(원)'], '']
-                        for ci, v in enumerate(sub_vals, 1):
-                            cell = ws2.cell(row=current_row, column=ci, value=v)
-                            cell.font = Font(name='맑은 고딕', bold=True, size=10)
-                            cell.fill = subtotal_fill
-                            cell.border = border_all
-                            if ci >= 3 and isinstance(v, (int, float)):
-                                cell.number_format = num_fmt
-                                cell.alignment = right_align
-                            elif ci == 1:
-                                cell.alignment = center_align
+                        # 용도 소계 행
+                        sub_전수 = sub_sums.get('전수(전)', 0)
+                        sub_길이 = sub_sums.get('길이(m)', 0)
+                        sub_환산 = (sub_전수 / sub_길이) * 100 if sub_길이 > 0 else 0
+                        sub_vals = [
+                            f'{u} 소계', '', sub_sums.get('길이(m)', 0),
+                            sub_sums.get('배관투자금액(원)', 0), sub_sums.get('시설투자', 0), sub_sums.get('총투자금액', 0),
+                            sub_sums.get('전수(전)', 0), sub_sums.get('가스소비량', 0),
+                            sub_sums.get('분담금일반', 0), sub_sums.get('취사전용', 0),
+                            sub_sums.get('수요가부담금', 0), sub_sums.get('총시설분담금', 0),
+                            sub_sums.get('기타이익', 0),
+                            sub_sums.get('판매량(MJ/년)', 0), sub_sums.get('판매액(원/년)', 0),
+                            sub_sums.get('판매원가(원/년)', 0), sub_sums.get('판매수익(원/년)', 0),
+                            '', '', '', sub_환산, '',
+                        ]
+                        _write_data_row(ws2, current_row, sub_vals, is_subtotal=True)
                         current_row += 1
 
-                        for k in grand_totals:
-                            grand_totals[k] += sub_sums[k]
+                        grand_count += len(rows_in_group)
+                        for k in grand_sums:
+                            grand_sums[k] += sub_sums.get(k, 0)
 
-                    # 총합계
-                    gt_vals = ['총합계', '', grand_totals['길이(m)'], grand_totals['배관투자금액(원)'],
-                               grand_totals['분담금(원)'], grand_totals['순투자(원)'], grand_totals['전수(전)'],
-                               grand_totals['판매량(MJ/년)'], grand_totals['판매액(원/년)'], grand_totals['판매원가(원/년)'],
-                               grand_totals['NPV(원)'], '']
-                    for ci, v in enumerate(gt_vals, 1):
-                        cell = ws2.cell(row=current_row, column=ci, value=v)
-                        cell.font = Font(name='맑은 고딕', bold=True, size=11)
-                        cell.fill = total_fill
-                        cell.border = border_all
-                        if ci >= 3 and isinstance(v, (int, float)):
-                            cell.number_format = num_fmt
-                            cell.alignment = right_align
-                        elif ci == 1:
-                            cell.alignment = center_align
+                    # 총합계 행
+                    gt_전수 = grand_sums.get('전수(전)', 0)
+                    gt_길이 = grand_sums.get('길이(m)', 0)
+                    gt_환산 = (gt_전수 / gt_길이) * 100 if gt_길이 > 0 else 0
+                    gt_vals = [
+                        '총합계', '', grand_sums.get('길이(m)', 0),
+                        grand_sums.get('배관투자금액(원)', 0), grand_sums.get('시설투자', 0), grand_sums.get('총투자금액', 0),
+                        grand_sums.get('전수(전)', 0), grand_sums.get('가스소비량', 0),
+                        grand_sums.get('분담금일반', 0), grand_sums.get('취사전용', 0),
+                        grand_sums.get('수요가부담금', 0), grand_sums.get('총시설분담금', 0),
+                        grand_sums.get('기타이익', 0),
+                        grand_sums.get('판매량(MJ/년)', 0), grand_sums.get('판매액(원/년)', 0),
+                        grand_sums.get('판매원가(원/년)', 0), grand_sums.get('판매수익(원/년)', 0),
+                        '', '', '', gt_환산, '',
+                    ]
+                    _write_data_row(ws2, current_row, gt_vals, is_total=True)
 
                     # 열 너비
-                    col_widths2 = [16, 28, 10, 18, 16, 18, 10, 16, 16, 16, 18, 10]
+                    col_widths2 = [12, 26, 8, 14, 10, 14, 8, 12, 12, 10, 12, 12, 10, 12, 12, 12, 12, 6, 14, 8, 8, 8]
                     for ci, w in enumerate(col_widths2, 1):
                         ws2.column_dimensions[get_column_letter(ci)].width = w
 

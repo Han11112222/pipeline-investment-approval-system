@@ -132,7 +132,11 @@ if menu_choice == '1. 배관 투자 경제성 결재 대시보드':
         sim_basic_price = st.number_input("주택용 월 기본요금 단가 (원)", value=900, step=10, format="%d", key="input_sim_basic_price")
         RATE = rate_pct / 100
         TAX = tax_pct / 100
-    st.title("🏗️ 배관 투자 경제성 결재 대시보드")
+    st.markdown(
+        '<h3 style="font-size:1.4rem; font-weight:600; color:#2C3E50; margin-top:0;">'
+        '📊 배관 투자 경제성 결재 대시보드</h3>',
+        unsafe_allow_html=True
+    )
     st.markdown("전산 시스템 Raw 데이터를 업로드하여 경제성을 시뮬레이션합니다. **분석에서 제외할 항목은 체크 해제**하세요.")
     if working_files:
         clean_df_list = []
@@ -531,7 +535,11 @@ elif menu_choice == '2. 배관 투자 승인 내역':
             except Exception as e:
                 pass
     # --- 메인 화면 상단 ---
-    st.title("📋 2026년도 배관 투자 승인 내역")
+    st.markdown(
+        '<h3 style="font-size:1.4rem; font-weight:600; color:#2C3E50; margin-top:0;">'
+        '🗂️ 2026년도 배관 투자 승인 내역</h3>',
+        unsafe_allow_html=True
+    )
     st.markdown("깃허브 파일 데이터를 바탕으로 **수요개발은 자동 계산**하고, **기본계획/인입은 공무팀 실적 파일과 연동**하여 산출합니다.")
     if working_files:
         available_chas_t2 = sorted(list(set(chas))) if chas else [1]
@@ -920,7 +928,11 @@ elif menu_choice == '3. 품의서 결재':
         RATE_T3 = rate_pct_t3 / 100
         TAX_T3 = tax_pct_t3 / 100
 
-    st.title("📄 품의서 결재")
+    st.markdown(
+        '<h3 style="font-size:1.4rem; font-weight:600; color:#2C3E50; margin-top:0;">'
+        '📝 품의서 결재</h3>',
+        unsafe_allow_html=True
+    )
     st.markdown("깃허브(또는 업로드)된 **기초자료**를 자동으로 파싱하여 품의서 양식의 **용도별분석** / **총괄경제** 표를 생성합니다.")
 
     if not working_files:

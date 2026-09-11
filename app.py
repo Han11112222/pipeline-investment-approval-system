@@ -1056,8 +1056,12 @@ elif menu_choice == '3. 품의서 결재':
                 sorted_usages_t3 = sorted(usages_with_data, key=lambda x: 9999 if x == '투자보수율가산' else (custom_order_t3.index(x) if x in custom_order_t3 else 999))
 
                 # ── 요약 카드 (차수 선택 바로 아래) ──
+                # ROE(투자보수율가산)는 대구시 지원분(약 66%) 제외 후 자사 부담분만 반영되어야 하는
+                # 항목이라, 상단 요약 카드에서는 계산 대상에서 제외한다. (하단 상세표에는 계속 표시)
+                usages_for_summary = [u for u in sorted_usages_t3 if u != '투자보수율가산']
+
                 _pre_ydb = []
-                for u in sorted_usages_t3:
+                for u in usages_for_summary:
                     u_df_pre = filtered_t3[filtered_t3['용도'] == u]
                     u_sum_pre = u_df_pre[calc_cols_t3].sum()
                     u_npv_pre, u_irr_pre, _, _ = t3_calc(u_sum_pre, u)
@@ -1065,7 +1069,7 @@ elif menu_choice == '3. 품의서 결재':
                 _tot_cnt = sum(r['건수'] for r in _pre_ydb)
                 _tot_inv = sum(r['배관투자금액'] for r in _pre_ydb)
                 _tot_npv_pre = sum(r['NPV'] for r in _pre_ydb)
-                _all_sum_pre = filtered_t3[filtered_t3['용도'].isin(usages_with_data)][calc_cols_t3].sum()
+                _all_sum_pre = filtered_t3[filtered_t3['용도'].isin(usages_for_summary)][calc_cols_t3].sum()
                 _, _tot_irr_pre, _tot_irr_msg_pre, _ = t3_calc(_all_sum_pre, '합산')
                 _irr_str = f"{_tot_irr_pre*100:.2f}%" if _tot_irr_pre is not None else _tot_irr_msg_pre
 
@@ -1075,7 +1079,7 @@ elif menu_choice == '3. 품의서 결재':
                                 border-radius: 12px; padding: 20px 28px; margin-bottom: 24px;
                                 border: 1px solid #AED6F1;">
                         <p style="margin:0 0 14px 0; font-size:17px; color:#2C3E50; font-weight:600;">
-                            📋 {selected_cha_t3}차 품의서 요약
+                            📋 {selected_cha_t3}차 품의서 요약 (ROE제외)
                         </p>
                         <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
                             <div style="flex:1; min-width:140px; text-align:center;">
